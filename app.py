@@ -464,7 +464,7 @@ def render_logo_sidebar() -> None:
         )
     with col_txt:
         _header_text()
-            return
+    return
     # Fallback
     col_badge, col_txt = st.columns([1, 5])
     with col_badge:
