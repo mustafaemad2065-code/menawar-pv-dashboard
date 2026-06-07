@@ -428,7 +428,7 @@ def render_logo_sidebar() -> None:
     )
 
 
-def render_logo_header() -> None:
+    def render_logo_header() -> None:
     """Render logo in main header: FIXED with flat indentation to prevent deployment errors."""
     for path in _logo_paths():
         if os.path.exists(path):
