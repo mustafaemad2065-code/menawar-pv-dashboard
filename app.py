@@ -406,34 +406,40 @@ def _logo_paths() -> list[str]:
     return ["logo.jpg", "logo.png", "logo.jpeg", "logo.JPG", "logo.PNG"]
 
 
-    def render_logo_sidebar(self) -> None:
-        """Render logo in sidebar: real image if found, else styled text card."""
-        path = next((p for p in ["logo.jpg", "logo.png", "logo.jpeg", "logo.JPG", "logo.PNG"] if os.path.exists(p)), None)
-        if path:
+def render_logo_sidebar() -> None:
+    """Render logo in sidebar: real image if found, else styled text card."""
+    for path in _logo_paths():
+        if os.path.exists(path):
             st.sidebar.image(path, use_container_width=True)
-        else:
-            sidebar_html = '<div style="text-align:center;padding:16px 12px;background:linear-gradient(135deg,rgba(58,125,30,.08),rgba(212,160,48,.05));border:2px solid rgba(58,125,30,.28);border-radius:16px;margin-bottom:4px;"><div style="font-size:2rem;margin-bottom:4px;">☀️</div><div style="font-family:\'Space Grotesk\',sans-serif;font-weight:800;font-size:1.1rem;color:#2d6a2d;letter-spacing:3px;">MENAWAR</div><div style="font-size:.56rem;color:#8aaa7a;letter-spacing:2px;text-transform:uppercase;margin-top:3px;">PV Intelligence</div></div>'
-            st.sidebar.markdown(sidebar_html, unsafe_allow_html=True)
+            return
+    # Fallback styled card
+    st.sidebar.markdown(
+        """
+<div style='text-align:center;padding:16px 12px;
+            background:linear-gradient(135deg,rgba(58,125,30,.08),rgba(212,160,48,.05));
+            border:2px solid rgba(58,125,30,.28);border-radius:16px;margin-bottom:4px;'>
+  <div style='font-size:2rem;margin-bottom:4px;'>☀️</div>
+  <div style='font-family:"Space Grotesk",sans-serif;font-weight:800;font-size:1.1rem;
+              color:#2d6a2d;letter-spacing:3px;'>MENAWAR</div>
+  <div style='font-size:.56rem;color:#8aaa7a;letter-spacing:2px;text-transform:uppercase;margin-top:3px;'>
+    PV Intelligence</div>
+</div>""",
+        unsafe_allow_html=True,
+    )
 
-    def render_logo_header(self) -> None:
-        """Render logo in main header: FIXED to prevent stretch & pixelation using advanced CSS rendering."""
-        path = next((p for p in ["logo.jpg", "logo.png", "logo.jpeg", "logo.JPG", "logo.PNG"] if os.path.exists(p)), None)
-        now_str = datetime.now().strftime('%A, %d %B %Y · %H:%M')
-        
-        # نص الهيدر الموحد والمدمج مباشرة داخل متغير لمنع الـ NameError
-        header_text_html = f"<div><div style='font-size:.58rem;color:#3a7d1e;letter-spacing:3px;text-transform:uppercase;margin-bottom:4px;font-weight:600;'>Solar Tracking &amp; IoT System</div><div style='font-family:\"Space Grotesk\",sans-serif;font-weight:800;font-size:2rem;color:#2d6a2d;letter-spacing:4px;'>MENAWAR</div><div style='font-family:\"Space Grotesk\",sans-serif;font-size:.82rem;font-weight:700;color:#3a7d1e;letter-spacing:2px;text-transform:uppercase;margin-top:2px;'>PV Diagnostic Intelligence</div><div style='font-size:.65rem;color:#8aaa7a;letter-spacing:1.5px;text-transform:uppercase;margin-top:3px;'>AI-Powered Solar Panel Health Monitoring &middot; {now_str}</div></div>"
 
-        if path:
-            col_img, col_txt = st.columns([1, 5])
-            col_img.markdown(f'<div style="display:flex;align-items:center;justify-content:center;"><img src="app/static/{path}" width="130" style="max-width:100%;height:auto;object-fit:contain;image-rendering:-webkit-optimize-contrast;image-rendering:crisp-edges;image-rendering:pixelated;"/></div>', unsafe_allow_html=True)
-            col_txt.markdown(header_text_html, unsafe_allow_html=True)
-        else:
-            col_badge, col_txt = st.columns([1, 5])
-            col_badge.markdown("<div style='background:linear-gradient(135deg,#2d6a2d,#3a7d1e);border-radius:18px;padding:16px;text-align:center;margin-top:4px;'><div style='font-size:2.2rem;'>☀️</div></div>", unsafe_allow_html=True)
-            col_txt.markdown(header_text_html, unsafe_allow_html=True)
-    return
+def render_logo_header() -> None:
+    """Render logo in main header: real image or large emoji badge."""
+    for path in _logo_paths():
+        if os.path.exists(path):
+            col_img, col_txt = st.columns([1, 6])
+            with col_img:
+                st.image(path, width=80)
+            with col_txt:
+                _header_text()
+            return
     # Fallback
-    col_badge, col_txt = st.columns([1, 5])
+    col_badge, col_txt = st.columns([1, 6])
     with col_badge:
         st.markdown(
             """<div style='background:linear-gradient(135deg,#2d6a2d,#3a7d1e);
