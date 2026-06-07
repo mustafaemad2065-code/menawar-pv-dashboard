@@ -429,15 +429,42 @@ def render_logo_sidebar() -> None:
 
 
 def render_logo_header() -> None:
-    """Render logo in main header: real image or large emoji badge."""
+    """Render logo in main header: FIXED to prevent stretch & pixelation using advanced CSS rendering."""
     for path in _logo_paths():
         if os.path.exists(path):
             col_img, col_txt = st.columns([1, 5])
             with col_img:
-                # تم إلغاء التمدد وتحديد العرض بدقة لمنع البكسلة نهائياً
-                st.image(path, use_container_width=False, width=130)
+                # نستخدم حاوية HTML مخصصة تمنع البكسلة وتجعل الصورة حادة جداً
+                st.markdown(
+                    f"""
+                    <div style="display: flex; align-items: center; justify-content: center;">
+                        <img src="app/static/{path}" width="130" style="
+                            max-width: 100%; 
+                            height: auto; 
+                            object-fit: contain;
+                            image-rendering: -webkit-optimize-contrast; /* للمتصفحات مثل كروم وسفاري */
+                            image-rendering: crisp-edges;               /* للمتصفحات الحديثة */
+                            image-rendering: pixelated;                 /* منع البكسلة العشوائية */
+                        "/>
+                    </div>
+                    """, 
+                    unsafe_allow_html=True
+                )
             with col_txt:
                 _header_text()
+            return
+    # Fallback في حال عدم وجود الصورة
+    col_badge, col_txt = st.columns([1, 5])
+    with col_badge:
+        st.markdown(
+            """<div style='background:linear-gradient(135deg,#2d6a2d,#3a7d1e);
+                border-radius:18px;padding:16px;text-align:center;margin-top:4px;'>
+              <div style='font-size:2.2rem;'>☀️</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+    with col_txt:
+        _header_text()
             return
     # Fallback
     col_badge, col_txt = st.columns([1, 5])
