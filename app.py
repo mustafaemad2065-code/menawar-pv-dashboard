@@ -429,28 +429,22 @@ def render_logo_sidebar() -> None:
 
 
 def render_logo_header() -> None:
-    """Render logo in main header: FIXED to prevent stretch & pixelation using advanced CSS rendering."""
+    """Render logo in main header: FIXED with flat indentation to prevent deployment errors."""
     for path in _logo_paths():
         if os.path.exists(path):
             col_img, col_txt = st.columns([1, 5])
             with col_img:
-                st.markdown(
-                    f"""
-                    <div style="display: flex; align-items: center; justify-content: center;">
-                        <img src="app/static/{path}" width="130" style="
-                            max-width: 100%; 
-                            height: auto; 
-                            object-fit: contain;
-                            image-rendering: -webkit-optimize-contrast;
-                            image-rendering: crisp-edges;
-                            image-rendering: pixelated;
-                        "/>
-                    </div>
-                    """, 
-                    unsafe_allow_html=True
-                )
+                html_code = f'<div style="display:flex;align-items:center;justify-content:center;"><img src="app/static/{path}" width="130" style="max-width:100%;height:auto;object-fit:contain;image-rendering:-webkit-optimize-contrast;image-rendering:crisp-edges;image-rendering:pixelated;"/></div>'
+                st.markdown(html_code, unsafe_allow_html=True)
             with col_txt:
                 _header_text()
+            return
+
+    col_badge, col_txt = st.columns([1, 5])
+    with col_badge:
+        st.markdown("<div style='background:linear-gradient(135deg,#2d6a2d,#3a7d1e);border-radius:18px;padding:16px;text-align:center;margin-top:4px;'><div style='font-size:2.2rem;'>☀️</div></div>", unsafe_allow_html=True)
+    with col_txt:
+        _header_text()
             return
 
     col_badge, col_txt = st.columns([1, 5])
