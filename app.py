@@ -432,14 +432,15 @@ def render_logo_header() -> None:
     """Render logo in main header: real image or large emoji badge."""
     for path in _logo_paths():
         if os.path.exists(path):
-            col_img, col_txt = st.columns([1, 6])
+            col_img, col_txt = st.columns([1, 5])
             with col_img:
-                st.image(path, width=80)
+                # تم إلغاء التمدد وتحديد العرض بدقة لمنع البكسلة نهائياً
+                st.image(path, use_container_width=False, width=130)
             with col_txt:
                 _header_text()
             return
     # Fallback
-    col_badge, col_txt = st.columns([1, 6])
+    col_badge, col_txt = st.columns([1, 5])
     with col_badge:
         st.markdown(
             """<div style='background:linear-gradient(135deg,#2d6a2d,#3a7d1e);
