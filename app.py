@@ -416,7 +416,7 @@ def _logo_paths() -> list[str]:
             st.sidebar.markdown(sidebar_html, unsafe_allow_html=True)
 
     def render_logo_header(self) -> None:
-        """Render logo in main header: FIXED with flat indentation to prevent deployment errors."""
+        """Render logo in main header: FIXED to prevent stretch & pixelation using advanced CSS rendering."""
         path = next((p for p in ["logo.jpg", "logo.png", "logo.jpeg", "logo.JPG", "logo.PNG"] if os.path.exists(p)), None)
         if path:
             col_img, col_txt = st.columns([1, 5])
