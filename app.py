@@ -434,7 +434,6 @@ def render_logo_header() -> None:
         if os.path.exists(path):
             col_img, col_txt = st.columns([1, 5])
             with col_img:
-                # نستخدم حاوية HTML مخصصة تمنع البكسلة وتجعل الصورة حادة جداً
                 st.markdown(
                     f"""
                     <div style="display: flex; align-items: center; justify-content: center;">
@@ -442,9 +441,9 @@ def render_logo_header() -> None:
                             max-width: 100%; 
                             height: auto; 
                             object-fit: contain;
-                            image-rendering: -webkit-optimize-contrast; /* للمتصفحات مثل كروم وسفاري */
-                            image-rendering: crisp-edges;               /* للمتصفحات الحديثة */
-                            image-rendering: pixelated;                 /* منع البكسلة العشوائية */
+                            image-rendering: -webkit-optimize-contrast;
+                            image-rendering: crisp-edges;
+                            image-rendering: pixelated;
                         "/>
                     </div>
                     """, 
@@ -452,6 +451,19 @@ def render_logo_header() -> None:
                 )
             with col_txt:
                 _header_text()
+            return
+    # Fallback in case image is missing
+    col_badge, col_txt = st.columns([1, 5])
+    with col_badge:
+        st.markdown(
+            """<div style='background:linear-gradient(135deg,#2d6a2d,#3a7d1e);
+                border-radius:18px;padding:16px;text-align:center;margin-top:4px;'>
+              <div style='font-size:2.2rem;'>☀️</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+    with col_txt:
+        _header_text()
             return
     # Fallback في حال عدم وجود الصورة
     col_badge, col_txt = st.columns([1, 5])
