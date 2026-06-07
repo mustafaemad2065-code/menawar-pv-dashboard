@@ -452,6 +452,19 @@ def render_logo_header() -> None:
             with col_txt:
                 _header_text()
             return
+
+    col_badge, col_txt = st.columns([1, 5])
+    with col_badge:
+        st.markdown(
+            """<div style='background:linear-gradient(135deg,#2d6a2d,#3a7d1e);
+                border-radius:18px;padding:16px;text-align:center;margin-top:4px;'>
+              <div style='font-size:2.2rem;'>☀️</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+    with col_txt:
+        _header_text()
+            return
     # Fallback in case image is missing
     col_badge, col_txt = st.columns([1, 5])
     with col_badge:
