@@ -694,24 +694,38 @@ class PVDashboard:
         for _, row in df.iterrows():
             h     = row["time"].hour
             night = h > 19 or h < 6
-            v, a, uv, dust, soc = row["V_PV"], row["Amp"], row["UV"], row["Dust"], row["SOC"]
+            v, a, uv, uv_id, dust, soc = (
+                row["V_PV"], row["Amp"], row["UV"],
+                row.get("UV_Ideal", row["UV"]), row["Dust"], row["SOC"]
+            )
+            night = is_night_time(row["time"])
             if night:
-                s = (
-                    "Critical Battery" if soc <= 30
-                    else ("Night — Low Battery" if soc <= 40 else "Night — Normal")
-                )
-            elif v < 2.0 and uv > 3.0:
-                s = "Disconnected"
-            elif v < 5.5 and a < 0.15 and uv > 3.0:
-                s = "Short Circuit"
-            elif v > 22.0 or a < -0.1:
-                s = "Sensor Fault"
-            elif uv < 1.0:
-                s = "Critical Shading"
-            elif dust > 40:
-                s = "Soiling Detected"
+                # ── ليلاً: بس Soiling + حالة البطارية ──
+                if dust > 40:
+                    s = "Soiling Detected"
+                elif soc <= 30:
+                    s = "Critical Battery"
+                elif soc <= 40:
+                    s = "Night — Low Battery"
+                else:
+                    s = "Night — Normal"
             else:
-                s = "Normal"
+                # ── فترة الإنتاج: كل المشاكل ──
+                is_dl = uv_id > 3.0
+                if v < 2.0 and is_dl:
+                    s = "Disconnected"
+                elif v < 5.5 and a < 0.15 and is_dl:
+                    s = "Short Circuit"
+                elif v > 22.0 or a < -0.1:
+                    s = "Sensor Fault"
+                elif uv < 1.0 and uv_id > 1.0:
+                    s = "Critical Shading"
+                elif dust > 40:
+                    s = "Soiling Detected"
+                elif soc >= 100:
+                    s = "Battery Full"
+                else:
+                    s = "Normal"
             out.append(s)
         df = df.copy()
         df["Status"] = out
@@ -750,31 +764,61 @@ class PVDashboard:
 
     # ── Rule override ──────────────────────
     def rule_override(
-        self, v_pv, v_batt, amp, uv, dust, soc, vd,
+        self, v_pv, v_batt, amp, uv, uv_ideal, dust, soc, vd,
         is_night, connected, mode, status,
     ) -> tuple:
+
+        # ══════════════════════════════════════
+        #  NIGHT MODE  (بعد 7:30 م — قبل 6 ص)
+        # ══════════════════════════════════════
         if is_night:
+            # Soiling يُكتشف ليلاً — الغبار مش بيختفي بالليل
+            if dust > 40:
+                return (
+                    "Soiling Detected", "warn", st.warning,
+                    f"⚠️ **Soiling Detected** — Dust {dust:.0f}% · يُنصح بالتنظيف قبل الفجر.", None,
+                )
+            # بطارية حرجة — وقف الحمل فوراً
             if soc <= 30.0:
-                fd = "🔴 <b>Critical Battery</b> — Disconnect Greenhouse load immediately."
+                fd = (
+                    "🔴 <b>Critical Battery</b> — افصل حمل الصوبة فوراً للحفاظ على البطارية."
+                )
                 return (
                     "Critical Battery", "crit", st.error,
-                    f"🛑 **CRITICAL: Battery {soc:.1f}%** — Disconnect load now.", fd,
+                    f"🛑 **CRITICAL — Battery {soc:.1f}%** — افصل الحمل من البطارية الآن!", fd,
                 )
+            # بطارية منخفضة — تحذير مبكر
             if soc <= 40.0:
                 return (
                     "Night — Battery Low", "warn", st.warning,
-                    f"🌙 Night · SOC {soc:.1f}% · Approaching 30%", None,
+                    f"⚠️ **Night — Battery Low {soc:.1f}%** — تقترب من 30%، راقب الحمل.", None,
                 )
-            return "Night — Normal", "ok", st.info, f"🌙 Night Normal · SOC {soc:.1f}%", None
+            return (
+                "Night — Normal", "ok", st.info,
+                f"🌙 Night Normal — SOC {soc:.1f}% · {v_batt:.2f} V", None,
+            )
 
+        # ══════════════════════════════════════
+        #  PRODUCTION MODE  (6 ص — 7:30 م)
+        # ══════════════════════════════════════
         if not connected and mode == "📡 Live ThingSpeak":
             return status, "warn", st.warning, f"⚠️ Stale data — Last known: **{status}**", None
 
-        if v_pv < 5.5 and amp < 0.15 and uv > 3.0:
+        # بطارية ممتلئة — ابدأ فترة النايت مود جاهزاً
+        if soc >= 100.0:
+            return (
+                "Battery Full", "ok", st.success,
+                "✅ **البطارية اتملت 100%** — النظام يغذي حمل الصوبة. جاهز لفترة الليل.", None,
+            )
+
+        # UV_IDEAL للتأكد من وجود شمس — مش UV_ACTUAL اللي قد يكون منخفض بسبب الخلل
+        is_daylight = uv_ideal > 3.0
+
+        if v_pv < 5.5 and amp < 0.15 and is_daylight:
             fd = "🔴 <b>Short Circuit</b> — PV collapsed. Disconnect & inspect wiring."
             return "Short Circuit", "crit", st.error, "🚨 **Short Circuit** detected.", fd
 
-        if v_pv < 2.0 and uv > 3.0:
+        if v_pv < 2.0 and is_daylight:
             fd = "🔴 <b>Disconnection</b> — PV near-zero in daylight. Check MC4 connectors."
             return "Disconnected", "crit", st.error, "🔌 **Disconnected** — Panel not feeding.", fd
 
@@ -782,10 +826,12 @@ class PVDashboard:
             fd = "🟡 <b>Sensor Fault</b> — Readings out of range. Verify wiring."
             return "Sensor Fault", "warn", st.warning, "⚙️ **Sensor Fault** detected.", fd
 
-        if uv < 1.0:
+        # شادينج: UV_ACTUAL منخفض وUV_IDEAL مرتفع — في ضوء بس مش واصل للبانيل
+        if uv < 1.0 and uv_ideal > 1.0:
             return "Critical Shading", "crit", st.error, "🚨 **Critical Shading** — UV near zero.", None
 
-        if dust > 40 and "Normal" in status:
+        # Soiling مستقل — مش مشروط بحاجة
+        if dust > 40:
             return "Soiling Detected", "warn", st.warning, "⚠️ **Soiling** — Cleaning recommended.", None
 
         if "Normal" in status:
@@ -2304,7 +2350,7 @@ class PVDashboard:
             confidence   = float(np.max(probs))
             vd           = features_df["V_Diff"].values[0]
             final_status, css_class, alert_fn, alert_text, fault_detail = self.rule_override(
-                v_pv, v_batt, amp, uv_in, dust_in, soc, vd,
+                v_pv, v_batt, amp, uv_in, uv_ideal_in, dust_in, soc, vd,
                 is_night, is_connected, mode, ai_status,
             )
         except Exception as e:
