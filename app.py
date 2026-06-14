@@ -4,10 +4,16 @@ import numpy as np
 import joblib
 import requests
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import time
 import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+# Cairo timezone — كل datetime.now() يمر من هنا
+_CAIRO = ZoneInfo("Africa/Cairo")
+def now_cairo() -> datetime:
+    return datetime.now(_CAIRO)
 
 # ─────────────────────────────────────────
 #  PAGE CONFIG  (must be first Streamlit call)
@@ -472,7 +478,7 @@ def render_logo_header() -> None:
 
 
 def _header_text() -> None:
-    now = datetime.now()
+    now = now_cairo()
     st.markdown(
         f"""
 <div>
@@ -522,7 +528,7 @@ def validate_thingspeak(channel_id: str, read_key: str) -> tuple[bool, str]:
 #  FIX 4 — WEATHER SIMULATION
 # ─────────────────────────────────────────
 def simulate_weather_forecast() -> dict:
-    rng = np.random.default_rng(seed=int(datetime.now().strftime("%Y%m%d")))
+    rng = np.random.default_rng(seed=int(now_cairo().strftime("%Y%m%d")))
     conditions = ["Clear Sky ☀️", "Partly Cloudy 🌤", "Overcast ☁️", "Light Haze 🌫"]
     weights    = [0.45, 0.30, 0.15, 0.10]
     idx        = rng.choice(len(conditions), p=weights)
@@ -597,7 +603,7 @@ class PVDashboard:
     # ── Data fetch ────────────────────────
     def fetch_live(self) -> tuple:
         if not self.channel_id or not self.read_api_key:
-            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, datetime.now().time(), False, False, 0.0
+            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, now_cairo().time(), False, False, 0.0
         url = (
             f"https://api.thingspeak.com/channels/{self.channel_id}/feeds.json"
             f"?api_key={self.read_api_key}&results=1"
@@ -607,7 +613,7 @@ class PVDashboard:
             res.raise_for_status()
             feeds = res.json().get("feeds", [])
             if not feeds:
-                return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, datetime.now().time(), False, False, 0.0
+                return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, now_cairo().time(), False, False, 0.0
             f        = feeds[0]
             v_pv     = float(f.get("field1") or 0)
             v_batt   = float(f.get("field2") or 0)
@@ -621,16 +627,16 @@ class PVDashboard:
             if lu.tzinfo is None:
                 lu = lu.tz_localize("UTC")
             diff  = abs((pd.Timestamp.utcnow() - lu).total_seconds())
-            return v_pv, v_batt, amp, uv, uv_ideal, dust, pwr, ideal, datetime.now().time(), True, diff < 300, diff
+            return v_pv, v_batt, amp, uv, uv_ideal, dust, pwr, ideal, now_cairo().time(), True, diff < 300, diff
         except requests.exceptions.Timeout:
-            return 17.5, 12.4, 1.1, 8.0, 9.0, 5.0, 19.25, 20.0, datetime.now().time(), False, False, 0.0
+            return 17.5, 12.4, 1.1, 8.0, 9.0, 5.0, 19.25, 20.0, now_cairo().time(), False, False, 0.0
         except Exception:
-            return 17.5, 12.4, 1.1, 8.0, 9.0, 5.0, 19.25, 20.0, datetime.now().time(), False, False, 0.0
+            return 17.5, 12.4, 1.1, 8.0, 9.0, 5.0, 19.25, 20.0, now_cairo().time(), False, False, 0.0
 
     def fetch_history(self) -> pd.DataFrame | None:
         if not self.channel_id or not self.read_api_key:
             return None
-        now_c = datetime.now()
+        now_c = now_cairo()
         su = now_c.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=3)
         eu = su + timedelta(hours=27)
         urls = [
@@ -1031,7 +1037,7 @@ class PVDashboard:
             (st.error if level == "crit" else st.warning)(f"**{title}** — {detail}")
         if not risks:
             st.success("🔭 System expected to remain healthy.")
-        now = datetime.now()
+        now = now_cairo()
         next_h = [(now + timedelta(hours=i)).strftime("%H:%M") for i in range(1, 4)]
         soc_p = [soc]; pwr_p = []
         for i in range(3):
@@ -1582,7 +1588,7 @@ class PVDashboard:
             st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
             # 6-hour near-term cards
-            now = datetime.now()
+            now = now_cairo()
             next_h = [(now + timedelta(hours=i)).strftime("%H:%M") for i in range(1, 7)]
             soc_p = [soc]; pwr_p = []
             for i in range(6):
@@ -1858,17 +1864,17 @@ class PVDashboard:
                             ok, msg = self.send_talkback_command("CLEAN_ON")
                             if ok:
                                 st.success("✅ Cleaning command queued! ESP32 will start shortly.")
-                                st.session_state.cleaning_log.append(f"✅ Triggered — {datetime.now().strftime('%H:%M:%S')}")
+                                st.session_state.cleaning_log.append(f"✅ Triggered — {now_cairo().strftime('%H:%M:%S')}")
                             else:
                                 err_map = {"timeout": "Request timed out.", "missing_credentials": "Credentials missing."}
                                 st.error(f"❌ Failed: {err_map.get(msg, msg)}")
-                                st.session_state.cleaning_log.append(f"❌ Error: {msg} — {datetime.now().strftime('%H:%M:%S')}")
+                                st.session_state.cleaning_log.append(f"❌ Error: {msg} — {now_cairo().strftime('%H:%M:%S')}")
                     with b2:
                         if st.button("⏹ Stop Cleaning", use_container_width=True):
                             ok, msg = self.send_talkback_command("CLEAN_OFF")
                             if ok:
                                 st.success("⏹ Stop command queued.")
-                                st.session_state.cleaning_log.append(f"⏹ Stopped — {datetime.now().strftime('%H:%M:%S')}")
+                                st.session_state.cleaning_log.append(f"⏹ Stopped — {now_cairo().strftime('%H:%M:%S')}")
                             else:
                                 st.error(f"❌ Failed: {msg}")
 
@@ -2149,7 +2155,7 @@ class PVDashboard:
     #  MAIN RENDER
     # ═══════════════════════════════════════
     def render(self) -> None:
-        now      = datetime.now()
+        now      = now_cairo()
         prod_now = is_production_period(now.time())
 
         # FIX 3: inject CSS (light-only) as very first Streamlit call
