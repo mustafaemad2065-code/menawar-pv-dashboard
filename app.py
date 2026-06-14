@@ -407,10 +407,20 @@ def _logo_paths() -> list[str]:
 
 
 def render_logo_sidebar() -> None:
-    """Render logo in sidebar: real image if found, else styled text card."""
+    """Render logo in sidebar: base64 inline HTML for crisp display, else styled text card."""
+    import base64 as _b64
     for path in _logo_paths():
         if os.path.exists(path):
-            st.sidebar.image(path, use_container_width=True)
+            with open(path, "rb") as f:
+                b64 = _b64.b64encode(f.read()).decode()
+            ext = path.rsplit(".", 1)[-1].lower().replace("jpg", "jpeg")
+            st.sidebar.markdown(
+                f"<div style='text-align:center;margin-bottom:8px;'>"
+                f"<img src='data:image/{ext};base64,{b64}' "
+                f"style='max-width:100%;height:auto;border-radius:12px;"
+                f"display:block;margin:0 auto;'/></div>",
+                unsafe_allow_html=True,
+            )
             return
     # Fallback styled card
     st.sidebar.markdown(
@@ -429,12 +439,21 @@ def render_logo_sidebar() -> None:
 
 
 def render_logo_header() -> None:
-    """Render logo in main header: real image or large emoji badge."""
+    """Render logo in main header: base64 inline HTML for crisp display, else emoji badge."""
+    import base64 as _b64
     for path in _logo_paths():
         if os.path.exists(path):
+            with open(path, "rb") as f:
+                b64 = _b64.b64encode(f.read()).decode()
+            ext = path.rsplit(".", 1)[-1].lower().replace("jpg", "jpeg")
             col_img, col_txt = st.columns([1, 6])
             with col_img:
-                st.image(path, width=80)
+                st.markdown(
+                    f"<img src='data:image/{ext};base64,{b64}' "
+                    f"style='width:100%;max-width:110px;height:auto;"
+                    f"border-radius:14px;display:block;margin-top:4px;'/>",
+                    unsafe_allow_html=True,
+                )
             with col_txt:
                 _header_text()
             return
@@ -596,7 +615,7 @@ class PVDashboard:
             pwr   = float(f.get("field4") or 0)
             ideal = float(f.get("field5") or 20.0)
             uv    = float(f.get("field7") or 0)
-            dust  = float(f.get("field6") or 0)
+            dust  = float(f.get("field8") or 0)
             lu    = pd.to_datetime(f.get("created_at"))
             if lu.tzinfo is None:
                 lu = lu.tz_localize("UTC")
@@ -644,7 +663,7 @@ class PVDashboard:
                     "Amp": amp, "Power_W": pwr,
                     "Ideal_Power_W": float(f.get("field5") or 20.0),
                     "UV": float(f.get("field7") or 0),
-                    "Dust": float(f.get("field6") or 0),
+                    "Dust": float(f.get("field8") or 0),
                     "SOC": soc,
                 })
             if not rows:
@@ -772,6 +791,23 @@ class PVDashboard:
             return status, "ok", st.success, f"✅ **{status}** — System optimal.", None
 
         return status, "crit", st.error, f"⚠️ **{status}**", None
+
+    # ── TalkBack Command ──────────────────
+    def send_talkback_command(self, command: str) -> tuple[bool, str]:
+        app_id = st.session_state.get("ts_talkback_app_id", "").strip()
+        tb_key = st.session_state.get("ts_talkback_key", "").strip()
+        if not app_id or not tb_key:
+            return False, "missing_credentials"
+        url = f"https://api.thingspeak.com/talkbacks/{app_id}/commands.json"
+        try:
+            r = requests.post(url, data={"api_key": tb_key, "command_string": command}, timeout=8)
+            if r.status_code == 201:
+                return True, command
+            return False, f"http_{r.status_code}"
+        except requests.exceptions.Timeout:
+            return False, "timeout"
+        except Exception as e:
+            return False, str(e)
 
     # ─────────────────────────────────────
     #  SHARED SOC GAUGE
@@ -1756,48 +1792,38 @@ class PVDashboard:
                 st.markdown(
                     """<div class='mn-card' style='padding:20px 22px;'>
   <div style='font-size:.75rem;color:#2d6a2d;font-weight:700;margin-bottom:6px;letter-spacing:.5px;'>🌐 ESP32 Cloud Cleaning Control</div>
-  <div style='font-size:.72rem;color:#4a6741;margin-bottom:16px;line-height:1.6;'>Commands dispatched via ThingSpeak (Field 8). Your ESP32 polls the channel and executes globally from anywhere in the world.</div>""",
+  <div style='font-size:.72rem;color:#4a6741;margin-bottom:16px;line-height:1.6;'>Commands dispatched via ThingSpeak TalkBack API. Your ESP32 polls the TalkBack queue and executes commands globally from anywhere in the world.</div>""",
                     unsafe_allow_html=True,
                 )
                 if "cleaning_log" not in st.session_state:
                     st.session_state.cleaning_log = []
-                write_key = self.write_api_key
-                if not write_key:
-                    st.warning("⚠️ Enter your **Write API Key** in the sidebar to enable cloud cleaning control.")
+                app_id = st.session_state.get("ts_talkback_app_id", "").strip()
+                tb_key = st.session_state.get("ts_talkback_key", "").strip()
+                if not app_id or not tb_key:
+                    st.warning(
+                        "⚠️ Enter your **TalkBack App ID** and **TalkBack API Key** in the sidebar "
+                        "under **🧹 CLEANING CONTROL** to enable remote cleaning."
+                    )
                 else:
                     b1, b2 = st.columns(2)
                     with b1:
                         if st.button("🧹 Trigger Cleaning", use_container_width=True, type="primary"):
-                            try:
-                                url = f"https://api.thingspeak.com/update?api_key={write_key}&field8=1"
-                                r = requests.get(url, timeout=8)
-                                if r.status_code == 200 and r.text.strip() != "0":
-                                    st.success("✅ Cleaning command sent! ESP32 will start shortly.")
-                                    st.session_state.cleaning_log.append(f"✅ Triggered — {datetime.now().strftime('%H:%M:%S')}")
-                                elif r.text.strip() == "0":
-                                    st.error("❌ ThingSpeak rejected. Check Write API Key or 15s rate limit.")
-                                else:
-                                    st.error(f"❌ HTTP {r.status_code}")
-                            except requests.exceptions.Timeout:
-                                st.error("⏱ Request timed out.")
-                                st.session_state.cleaning_log.append(f"❌ Timeout — {datetime.now().strftime('%H:%M:%S')}")
-                            except Exception as e:
-                                st.error(f"🔥 Failed: {e}")
-                                st.session_state.cleaning_log.append(f"❌ Error — {datetime.now().strftime('%H:%M:%S')}")
+                            ok, msg = self.send_talkback_command("CLEAN_ON")
+                            if ok:
+                                st.success("✅ Cleaning command queued! ESP32 will start shortly.")
+                                st.session_state.cleaning_log.append(f"✅ Triggered — {datetime.now().strftime('%H:%M:%S')}")
+                            else:
+                                err_map = {"timeout": "Request timed out.", "missing_credentials": "Credentials missing."}
+                                st.error(f"❌ Failed: {err_map.get(msg, msg)}")
+                                st.session_state.cleaning_log.append(f"❌ Error: {msg} — {datetime.now().strftime('%H:%M:%S')}")
                     with b2:
                         if st.button("⏹ Stop Cleaning", use_container_width=True):
-                            try:
-                                url = f"https://api.thingspeak.com/update?api_key={write_key}&field8=0"
-                                r = requests.get(url, timeout=8)
-                                if r.status_code == 200 and r.text.strip() != "0":
-                                    st.success("⏹ Stop command sent successfully.")
-                                    st.session_state.cleaning_log.append(f"⏹ Stopped — {datetime.now().strftime('%H:%M:%S')}")
-                                elif r.text.strip() == "0":
-                                    st.warning("⚠️ Rate limit reached (min 15s between updates).")
-                                else:
-                                    st.error(f"❌ HTTP {r.status_code}")
-                            except Exception as e:
-                                st.error(f"🔥 Error: {e}")
+                            ok, msg = self.send_talkback_command("CLEAN_OFF")
+                            if ok:
+                                st.success("⏹ Stop command queued.")
+                                st.session_state.cleaning_log.append(f"⏹ Stopped — {datetime.now().strftime('%H:%M:%S')}")
+                            else:
+                                st.error(f"❌ Failed: {msg}")
 
                 if st.session_state.get("cleaning_log"):
                     st.markdown(
@@ -2106,7 +2132,20 @@ class PVDashboard:
             help="ThingSpeak Read API Key for fetching data")
         st.sidebar.text_input("Write API Key", key="ts_write_key",
             placeholder="e.g. XXXXXXXXXXXXX", type="password",
-            help="ThingSpeak Write API Key — required for cloud cleaning control")
+            help="ThingSpeak Write API Key (optional)")
+
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("## 🧹 CLEANING CONTROL")
+        st.sidebar.markdown(
+            "<div style='font-size:.62rem;color:#8aaa7a;margin:-6px 0 10px 0;line-height:1.6;'>"
+            "ThingSpeak TalkBack — create a TalkBack app at thingspeak.com/talkbacks</div>",
+            unsafe_allow_html=True,
+        )
+        st.sidebar.text_input("TalkBack App ID", key="ts_talkback_app_id",
+            placeholder="e.g. 12345", help="Your ThingSpeak TalkBack App ID")
+        st.sidebar.text_input("TalkBack API Key", key="ts_talkback_key",
+            placeholder="TalkBack API Key", type="password",
+            help="ThingSpeak TalkBack API Key for sending cleaning commands to ESP32")
 
         ch_id  = st.session_state.get("ts_channel_id", "").strip()
         rd_key = st.session_state.get("ts_read_key",   "").strip()
@@ -2318,6 +2357,7 @@ class PVDashboard:
         #  No fallthrough, no bleed.
         # ══════════════════════════════════
         panel = st.session_state.active_panel
+        _panel_slot = st.empty()
 
         # Helper: fetch history only when needed
         def _get_hist() -> pd.DataFrame | None:
@@ -2326,57 +2366,66 @@ class PVDashboard:
                     return self.fetch_history()
             return None
 
-        if panel == "home":
-            self.panel_home(
-                v_pv, v_batt, amp, pwr_out, soc, uv_in, dust_in,
-                is_night, is_prod_p, final_status, css_class,
-                diff_sec, is_connected, mode, confidence, alert_fn, alert_text,
-                features_df, fault_detail, _get_hist(),
-            )
+        with _panel_slot.container():
+            if panel == "home":
+                self.panel_home(
+                    v_pv, v_batt, amp, pwr_out, soc, uv_in, dust_in,
+                    is_night, is_prod_p, final_status, css_class,
+                    diff_sec, is_connected, mode, confidence, alert_fn, alert_text,
+                    features_df, fault_detail, _get_hist(),
+                )
 
-        elif panel == "overview":
-            self.panel_overview(
-                v_pv, v_batt, amp, pwr_out, soc, uv_in, dust_in,
-                is_night, is_prod_p, final_status, css_class,
-                diff_sec, is_connected, mode, confidence, alert_fn, alert_text,
-            )
+            elif panel == "overview":
+                self.panel_overview(
+                    v_pv, v_batt, amp, pwr_out, soc, uv_in, dust_in,
+                    is_night, is_prod_p, final_status, css_class,
+                    diff_sec, is_connected, mode, confidence, alert_fn, alert_text,
+                )
 
-        elif panel == "diagnosis":
-            self.panel_diagnosis(
-                v_pv, v_batt, amp, uv_in, dust_in, soc, features_df,
-                final_status, css_class, alert_fn, alert_text, fault_detail, confidence,
-            )
+            elif panel == "diagnosis":
+                self.panel_diagnosis(
+                    v_pv, v_batt, amp, uv_in, dust_in, soc, features_df,
+                    final_status, css_class, alert_fn, alert_text, fault_detail, confidence,
+                )
 
-        elif panel == "day_report":
-            self.panel_day_report(_get_hist())
+            elif panel == "day_report":
+                self.panel_day_report(_get_hist())
 
-        elif panel == "battery":
-            self.panel_battery(soc, v_batt, is_prod_p, is_night, mode, _get_hist())
+            elif panel == "battery":
+                self.panel_battery(soc, v_batt, is_prod_p, is_night, mode, _get_hist())
 
-        elif panel == "prediction":
-            self.panel_prediction(
-                v_pv, v_batt, amp, uv_in, dust_in, soc,
-                features_df, final_status, _get_hist(),
-            )
+            elif panel == "prediction":
+                self.panel_prediction(
+                    v_pv, v_batt, amp, uv_in, dust_in, soc,
+                    features_df, final_status, _get_hist(),
+                )
 
-        elif panel == "cleaning":
-            self.panel_cleaning(dust_in)
+            elif panel == "cleaning":
+                self.panel_cleaning(dust_in)
 
-        elif panel == "about_us":
-            self.panel_about_us()
+            elif panel == "about_us":
+                self.panel_about_us()
 
-        elif panel == "contact_us":
-            self.panel_contact_us()
+            elif panel == "contact_us":
+                self.panel_contact_us()
 
-        # ── AUTO REFRESH ──
+        # ── AUTO REFRESH (1-second countdown — no monolithic sleep) ──
+        _REFRESH_INTERVAL = 16
         if (
             mode == "📡 Live ThingSpeak"
             and auto_refresh
             and panel not in ("about_us", "contact_us", "home")
         ):
-            st.caption(f"🔄 Next refresh in 16s · Last update: {now.strftime('%H:%M:%S')}")
-            time.sleep(16)
-            st.rerun()
+            if "next_refresh_at" not in st.session_state:
+                st.session_state.next_refresh_at = time.time() + _REFRESH_INTERVAL
+            remaining = max(0, int(st.session_state.next_refresh_at - time.time()))
+            if remaining <= 0:
+                st.session_state.next_refresh_at = time.time() + _REFRESH_INTERVAL
+                st.rerun()
+            else:
+                st.caption(f"🔄 Auto-refresh in {remaining}s · Last update: {now.strftime('%H:%M:%S')}")
+                time.sleep(1)
+                st.rerun()
 
 
 # ─────────────────────────────────────────
