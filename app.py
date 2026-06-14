@@ -597,7 +597,7 @@ class PVDashboard:
     # ── Data fetch ────────────────────────
     def fetch_live(self) -> tuple:
         if not self.channel_id or not self.read_api_key:
-            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, datetime.now().time(), False, False, 0.0
+            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, datetime.now().time(), False, False, 0.0
         url = (
             f"https://api.thingspeak.com/channels/{self.channel_id}/feeds.json"
             f"?api_key={self.read_api_key}&results=1"
@@ -607,24 +607,25 @@ class PVDashboard:
             res.raise_for_status()
             feeds = res.json().get("feeds", [])
             if not feeds:
-                return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, datetime.now().time(), False, False, 0.0
-            f     = feeds[0]
-            v_pv  = float(f.get("field1") or 0)
-            v_batt= float(f.get("field2") or 0)
-            amp   = float(f.get("field3") or 0)
-            pwr   = float(f.get("field4") or 0)
-            ideal = float(f.get("field5") or 20.0)
-            uv    = float(f.get("field7") or 0)
-            dust  = float(f.get("field8") or 0)
+                return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, datetime.now().time(), False, False, 0.0
+            f        = feeds[0]
+            v_pv     = float(f.get("field1") or 0)
+            v_batt   = float(f.get("field2") or 0)
+            amp      = float(f.get("field3") or 0)
+            pwr      = float(f.get("field4") or 0)
+            ideal    = float(f.get("field5") or 20.0)
+            uv_ideal = float(f.get("field6") or 0)   # UV_IDEAL
+            uv       = float(f.get("field7") or 0)   # UV_ACTUAL
+            dust     = float(f.get("field8") or 0)   # DUST RATIO
             lu    = pd.to_datetime(f.get("created_at"))
             if lu.tzinfo is None:
                 lu = lu.tz_localize("UTC")
             diff  = abs((pd.Timestamp.utcnow() - lu).total_seconds())
-            return v_pv, v_batt, amp, uv, dust, pwr, ideal, datetime.now().time(), True, diff < 300, diff
+            return v_pv, v_batt, amp, uv, uv_ideal, dust, pwr, ideal, datetime.now().time(), True, diff < 300, diff
         except requests.exceptions.Timeout:
-            return 17.5, 12.4, 1.1, 8.0, 5.0, 19.25, 20.0, datetime.now().time(), False, False, 0.0
+            return 17.5, 12.4, 1.1, 8.0, 9.0, 5.0, 19.25, 20.0, datetime.now().time(), False, False, 0.0
         except Exception:
-            return 17.5, 12.4, 1.1, 8.0, 5.0, 19.25, 20.0, datetime.now().time(), False, False, 0.0
+            return 17.5, 12.4, 1.1, 8.0, 9.0, 5.0, 19.25, 20.0, datetime.now().time(), False, False, 0.0
 
     def fetch_history(self) -> pd.DataFrame | None:
         if not self.channel_id or not self.read_api_key:
@@ -662,6 +663,7 @@ class PVDashboard:
                     "V_Batt": float(f.get("field2") or 0),
                     "Amp": amp, "Power_W": pwr,
                     "Ideal_Power_W": float(f.get("field5") or 20.0),
+                    "UV_Ideal": float(f.get("field6") or 0),
                     "UV": float(f.get("field7") or 0),
                     "Dust": float(f.get("field8") or 0),
                     "SOC": soc,
@@ -719,7 +721,7 @@ class PVDashboard:
     def process_telemetry(
         self,
         v_pv: float, v_batt: float, amp: float,
-        uv: float, dust: float, t,
+        uv: float, uv_ideal: float, dust: float, t,
         pwr: float | None = None,
         ideal: float = 20.0,
     ) -> tuple[pd.DataFrame, float, float, int]:
@@ -733,8 +735,7 @@ class PVDashboard:
         ts  = np.sin(2 * np.pi * tf / 24.0)
         tc2 = np.cos(2 * np.pi * tf / 24.0)
         ip  = 1 if 7 <= h <= 17 else 0
-        euv = max(0, ts * 10)
-        uvd = euv - uv
+        uvd = uv_ideal - uv          # UV_IDEAL (field6) - UV_ACTUAL (field7)
         v2u = v_pv / (uv + 0.5)
         sun = uv * ip
         ideal = ideal if ideal and ideal > 0 else 20.0
@@ -2248,7 +2249,7 @@ class PVDashboard:
 
         if mode == "📡 Live ThingSpeak":
             auto_refresh = st.sidebar.toggle("🔄 Auto-Refresh (16s)", value=True)
-            v_pv, v_batt, amp, uv_in, dust_in, pwr, ideal_pwr, t_in, success, is_connected, diff_sec = self.fetch_live()
+            v_pv, v_batt, amp, uv_in, uv_ideal_in, dust_in, pwr, ideal_pwr, t_in, success, is_connected, diff_sec = self.fetch_live()
             if success:
                 st.sidebar.markdown(
                     f"""<div style='background:rgba(45,138,62,.07);border:1px solid rgba(45,138,62,.28);
@@ -2261,8 +2262,8 @@ class PVDashboard:
             else:
                 if self.channel_id and self.read_api_key:
                     st.sidebar.error("⚠️ Connection failed. Using fallback values.")
-                v_pv, v_batt, amp, uv_in, dust_in, pwr, ideal_pwr, t_in = (
-                    17.5, 12.4, 1.1, 8.0, 5.0, 19.25, 20.0, now.time()
+                v_pv, v_batt, amp, uv_in, uv_ideal_in, dust_in, pwr, ideal_pwr, t_in = (
+                    17.5, 12.4, 1.1, 8.0, 9.0, 5.0, 19.25, 20.0, now.time()
                 )
         else:
             if "ui_time" not in st.session_state:
@@ -2273,6 +2274,7 @@ class PVDashboard:
             v_pv      = st.sidebar.number_input("PV Voltage (V)", value=17.5)
             v_batt    = st.sidebar.number_input("Battery Voltage (V)", value=12.4)
             amp       = st.sidebar.number_input("Current (A)", value=1.1)
+            uv_ideal_in = uv_in   # في السيميوليشن UV_IDEAL = UV_ACTUAL
             ideal_pwr = 20.0; pwr = None; is_connected = True
 
         st.sidebar.markdown("---")
@@ -2290,7 +2292,7 @@ class PVDashboard:
 
         # ── Process Telemetry ──
         features_df, pwr_out, soc, is_prod = self.process_telemetry(
-            v_pv, v_batt, amp, uv_in, dust_in, t_in, pwr, ideal_pwr
+            v_pv, v_batt, amp, uv_in, uv_ideal_in, dust_in, t_in, pwr, ideal_pwr
         )
         is_night   = is_night_time(t_in)
         is_prod_p  = is_production_period(t_in)
