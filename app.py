@@ -369,10 +369,9 @@ def fault_color(status: str) -> str:
     s = status.lower()
     if "normal"      in s: return "#2d8a3e"
     if "night"       in s: return "#5b6a3e"
-    if "ramp"        in s: return "#2d8a3e"   # ramp-up is healthy
-    if "industrial"  in s: return "#991b1b"   # permanent shading — critical
-    if "cloud"       in s: return "#c47a1e"   # temporary shading — warn
-    if "shading"     in s: return "#d4a030"   # fallback shading
+    if "industrial"  in s: return "#991b1b"
+    if "cloud"       in s: return "#c47a1e"
+    if "shading"     in s: return "#d4a030"
     if "soiling"     in s: return "#c47a1e"
     if "disconnect"  in s: return "#dc2626"
     if "short"       in s: return "#991b1b"
@@ -384,17 +383,16 @@ def fault_color(status: str) -> str:
 
 def fault_loss(status: str) -> int:
     s = status.lower()
-    if "normal"            in s: return 0
-    if "ramp"              in s: return 0    # ramp-up is not a fault
-    if "night"             in s: return 0
-    if "full"              in s: return 0
-    if "short"             in s: return 100
-    if "disconnect"        in s: return 100
+    if "normal"             in s: return 0
+    if "night"              in s: return 0
+    if "full"               in s: return 0
+    if "short"              in s: return 100
+    if "disconnect"         in s: return 100
     if "industrial shading" in s: return 85
-    if "cloud shading"     in s: return 40
-    if "shading"           in s: return 50  # fallback
-    if "soiling"           in s: return 30
-    if "sensor"            in s: return 10
+    if "cloud shading"      in s: return 40
+    if "shading"            in s: return 50
+    if "soiling"            in s: return 30
+    if "sensor"             in s: return 10
     return 20
 
 
@@ -694,7 +692,8 @@ class PVDashboard:
             lu    = pd.to_datetime(f.get("created_at"))
             if lu.tzinfo is None:
                 lu = lu.tz_localize("UTC")
-            diff  = abs((pd.Timestamp.utcnow() - lu).total_seconds())
+            now_utc = pd.Timestamp.now(tz="UTC")   # always timezone-aware
+            diff  = abs((now_utc - lu).total_seconds())
             return v_pv, v_batt, amp, uv, uv_ideal, dust, pwr, ideal, now_cairo().time(), True, diff < 300, diff
         except requests.exceptions.Timeout:
             return 17.5, 12.4, 1.1, 8.0, 9.0, 5.0, 19.25, 20.0, now_cairo().time(), False, False, 0.0
@@ -800,9 +799,6 @@ class PVDashboard:
                     s = "Soiling Detected"
                 elif soc >= 100:
                     s = "Battery Full"
-                # Early ramp-up: V_PV close to V_Batt, current near zero
-                elif vd < 1.5 and a < 0.2 and is_dl and soc < 100:
-                    s = "Normal — Ramp Up"
                 else:
                     s = "Normal"
             out.append(s)
@@ -844,7 +840,7 @@ class PVDashboard:
     # ── Rule override ──────────────────────
     def rule_override(
         self, v_pv, v_batt, amp, uv, uv_ideal, dust, soc, vd,
-        is_night, connected, mode, status,
+        is_night, connected, mode, status, diff_sec: float = 0.0,
     ) -> tuple:
 
         # ══════════════════════════════════════
@@ -884,8 +880,10 @@ class PVDashboard:
         # ══════════════════════════════════════
         #  PRODUCTION MODE  (6 AM — 7:30 PM)
         # ══════════════════════════════════════
-        if not connected and mode == "📡 Live ThingSpeak":
-            return status, "warn", st.warning, f"⚠️ Stale data — Last known status: **{status}**", None
+        # Only show "stale data" if the feed is genuinely old (> 10 minutes).
+        # A diff < 10 min means the data is fresh enough to run full diagnosis.
+        if mode == "📡 Live ThingSpeak" and diff_sec > 600:
+            return status, "warn", st.warning, f"⚠️ Stale data — No update for {fmt_seconds(int(diff_sec))}. Last known status: **{status}**", None
 
         # Battery fully charged — ready to feed greenhouse at night
         if soc >= 100.0:
@@ -898,22 +896,6 @@ class PVDashboard:
 
         # UV_IDEAL confirms daylight — not affected by actual shading
         is_daylight = uv_ideal > 3.0
-
-        # ── Early-production low-current window ──
-        # First ~30 min of production: V_PV ≈ V_Batt so current ≈ 0 — this is NORMAL
-        is_early_production = (
-            is_daylight
-            and vd < 1.5          # PV voltage still close to battery voltage
-            and amp < 0.2
-            and soc < 100.0
-        )
-        if is_early_production:
-            return (
-                "Normal — Ramp Up", "ok", st.info,
-                f"🌅 **Normal — Ramp-Up Phase** — "
-                f"PV voltage ({v_pv:.1f} V) is approaching battery voltage ({v_batt:.1f} V). "
-                "Current is near zero — this is expected at the start of production.", None,
-            )
 
         if v_pv < 5.5 and amp < 0.15 and is_daylight:
             fd = "🔴 <b>Short Circuit</b> — PV voltage collapsed. Disconnect panel and inspect all wiring and fuses."
@@ -1056,8 +1038,8 @@ class PVDashboard:
                     unsafe_allow_html=True,
                 )
                 alert_fn(alert_text)
-                if not connected and mode == "📡 Live ThingSpeak" and diff_sec > 300:
-                    st.error(f"🔌 CONNECTION LOST — No data for {fmt_seconds(diff_sec)}")
+                if mode == "📡 Live ThingSpeak" and diff_sec > 600:
+                    st.error(f"🔌 CONNECTION LOST — No data for {fmt_seconds(int(diff_sec))}")
             with col_gauge:
                 self._soc_gauge(soc, key="gauge_home")
 
@@ -1227,8 +1209,8 @@ class PVDashboard:
                     unsafe_allow_html=True,
                 )
                 alert_fn(alert_text)
-                if not connected and mode == "📡 Live ThingSpeak" and diff_sec > 300:
-                    st.error(f"🔌 CONNECTION LOST — No data for {fmt_seconds(diff_sec)}")
+                if mode == "📡 Live ThingSpeak" and diff_sec > 600:
+                    st.error(f"🔌 CONNECTION LOST — No data for {fmt_seconds(int(diff_sec))}")
             with col_gauge:
                 self._soc_gauge(soc, key="gauge_overview")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -2491,7 +2473,7 @@ class PVDashboard:
             vd           = features_df["V_Diff"].values[0]
             final_status, css_class, alert_fn, alert_text, fault_detail = self.rule_override(
                 v_pv, v_batt, amp, uv_in, uv_ideal_in, dust_in, soc, vd,
-                is_night, is_connected, mode, ai_status,
+                is_night, is_connected, mode, ai_status, diff_sec,
             )
         except Exception as e:
             final_status = "Unknown"; css_class = "warn"; alert_fn = st.warning
