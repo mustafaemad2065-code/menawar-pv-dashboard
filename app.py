@@ -975,15 +975,6 @@ class PVDashboard:
         if mode == "📡 Live ThingSpeak" and diff_sec > 600:
             return status, "warn", st.warning, f"⚠️ Stale data — No update for {fmt_seconds(int(diff_sec))}. Last known status: **{status}**", None
 
-        # Battery fully charged — ready to feed greenhouse at night
-        if soc >= 100.0:
-            return (
-                "Battery Full", "ok", st.success,
-                "✅ **Battery Fully Charged (100%)** — "
-                "Solar panel is now producing excess power. "
-                "You can redirect the load to another circuit or divert energy.", None,
-            )
-
         # UV_IDEAL confirms daylight.
         # If field6 is missing (0), fall back to time only — but require stronger
         # electrical evidence before flagging Disconnect / Short Circuit,
@@ -993,11 +984,8 @@ class PVDashboard:
         is_daylight_time = not is_night        # time-based fallback
 
         if uv_ideal_available:
-            # UV sensor active — use it as the primary daylight confirmation
             is_daylight = is_daylight_uv
         else:
-            # UV sensor absent — daylight only confirmed by time AND v_pv shows
-            # some voltage (proves panel exists and isn't just noise)
             is_daylight = is_daylight_time and v_pv > 1.0
 
         if v_pv < 5.5 and amp < 0.15 and is_daylight:
@@ -1042,6 +1030,15 @@ class PVDashboard:
                 "Soiling Detected", "warn", st.warning,
                 f"⚠️ **Soiling Detected** — Dust ratio {dust:.0f}% (above 60% threshold). "
                 "Panel cleaning is recommended to restore output.", None,
+            )
+
+        # ── Battery Full — only shown when no faults detected ──
+        if soc >= 100.0:
+            return (
+                "Battery Full", "ok", st.success,
+                "✅ **Battery Fully Charged (100%)** — "
+                "Solar panel is producing excess power. "
+                "You can redirect the load to another circuit or divert energy.", None,
             )
 
         if "Normal" in status:
