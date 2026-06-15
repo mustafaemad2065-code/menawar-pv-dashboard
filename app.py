@@ -367,25 +367,32 @@ def soc_color(s: float) -> str:
 
 def fault_color(status: str) -> str:
     s = status.lower()
-    if "normal"     in s: return "#2d8a3e"
-    if "night"      in s: return "#5b6a3e"
-    if "shading"    in s: return "#d4a030"
-    if "soiling"    in s: return "#c47a1e"
-    if "disconnect" in s: return "#dc2626"
-    if "short"      in s: return "#991b1b"
-    if "sensor"     in s: return "#b8860b"
-    if "critical"   in s: return "#dc2626"
+    if "normal"      in s: return "#2d8a3e"
+    if "night"       in s: return "#5b6a3e"
+    if "ramp"        in s: return "#2d8a3e"   # ramp-up is healthy
+    if "industrial"  in s: return "#991b1b"   # permanent shading — critical
+    if "cloud"       in s: return "#c47a1e"   # temporary shading — warn
+    if "shading"     in s: return "#d4a030"   # fallback shading
+    if "soiling"     in s: return "#c47a1e"
+    if "disconnect"  in s: return "#dc2626"
+    if "short"       in s: return "#991b1b"
+    if "sensor"      in s: return "#b8860b"
+    if "full"        in s: return "#2d8a3e"
+    if "critical"    in s: return "#dc2626"
     return "#64748b"
 
 
 def fault_loss(status: str) -> int:
     s = status.lower()
     if "normal"            in s: return 0
+    if "ramp"              in s: return 0    # ramp-up is not a fault
     if "night"             in s: return 0
+    if "full"              in s: return 0
     if "short"             in s: return 100
     if "disconnect"        in s: return 100
-    if "critical shading"  in s: return 85
-    if "shading"           in s: return 50
+    if "industrial shading" in s: return 85
+    if "cloud shading"     in s: return 40
+    if "shading"           in s: return 50  # fallback
     if "soiling"           in s: return 30
     if "sensor"            in s: return 10
     return 20
@@ -525,28 +532,89 @@ def validate_thingspeak(channel_id: str, read_key: str) -> tuple[bool, str]:
 
 
 # ─────────────────────────────────────────
-#  FIX 4 — WEATHER SIMULATION
+#  WEATHER FORECAST — Open-Meteo API (free, no key needed)
+#  Falls back to deterministic simulation on any network error.
 # ─────────────────────────────────────────
+@st.cache_data(ttl=3600)
+def fetch_weather_forecast(lat: float = 30.0444, lon: float = 31.2357) -> dict:
+    """
+    Fetch tomorrow's weather from Open-Meteo for given lat/lon.
+    Default coords = Cairo. Returns same dict shape as the old simulate_* helper.
+    """
+    try:
+        tomorrow = (now_cairo() + timedelta(days=1)).strftime("%Y-%m-%d")
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            f"&daily=weathercode,temperature_2m_max,shortwave_radiation_sum"
+            f"&timezone=Africa%2FCairo"
+            f"&start_date={tomorrow}&end_date={tomorrow}"
+        )
+        r = requests.get(url, timeout=8)
+        r.raise_for_status()
+        d = r.json().get("daily", {})
+        wcode    = int(d.get("weathercode", [0])[0])
+        temp_max = float(d.get("temperature_2m_max", [30])[0])
+        rad_sum  = float(d.get("shortwave_radiation_sum", [20])[0])  # MJ/m²
+
+        # WMO weather code → human label + radiation efficiency
+        if wcode == 0:
+            sky = "Clear Sky ☀️";      eff = 0.95
+        elif wcode in (1, 2):
+            sky = "Partly Cloudy 🌤";   eff = 0.75
+        elif wcode == 3:
+            sky = "Overcast ☁️";       eff = 0.45
+        elif wcode in (45, 48):
+            sky = "Foggy / Hazy 🌫";   eff = 0.55
+        elif wcode in range(51, 68):
+            sky = "Drizzle / Rain 🌧";  eff = 0.35
+        elif wcode in range(71, 78):
+            sky = "Snow ❄️";            eff = 0.25
+        elif wcode in (80, 81, 82):
+            sky = "Rain Showers 🌦";    eff = 0.40
+        elif wcode in range(95, 100):
+            sky = "Thunderstorm ⛈";    eff = 0.20
+        else:
+            sky = "Partly Cloudy 🌤";   eff = 0.72
+
+        # Refine eff using actual shortwave radiation (clear-sky ≈ 25 MJ/m²/day)
+        if rad_sum > 0:
+            eff = min(0.97, max(0.10, rad_sum / 25.0))
+
+        return {
+            "sky":           sky,
+            "atm_temp":      round(temp_max, 1),
+            "radiation_eff": round(eff, 3),
+            "description":   f"Tomorrow: {sky} · {temp_max:.0f}°C · Solar radiation {int(eff*100)}%",
+            "source":        "Open-Meteo (Live)",
+        }
+    except Exception:
+        # Deterministic fallback — same seed as before
+        rng = np.random.default_rng(seed=int(now_cairo().strftime("%Y%m%d")))
+        conditions = ["Clear Sky ☀️", "Partly Cloudy 🌤", "Overcast ☁️", "Light Haze 🌫"]
+        weights    = [0.45, 0.30, 0.15, 0.10]
+        idx        = rng.choice(len(conditions), p=weights)
+        sky        = conditions[idx]
+        eff_map = {
+            "Clear Sky ☀️":    0.95,
+            "Partly Cloudy 🌤": 0.72,
+            "Overcast ☁️":     0.45,
+            "Light Haze 🌫":   0.60,
+        }
+        atm_temp      = round(rng.uniform(22, 38), 1)
+        radiation_eff = eff_map[sky]
+        return {
+            "sky":           sky,
+            "atm_temp":      atm_temp,
+            "radiation_eff": radiation_eff,
+            "description":   f"Tomorrow: {sky} · {atm_temp}°C · Solar radiation {int(radiation_eff*100)}%",
+            "source":        "Estimated (offline)",
+        }
+
+
 def simulate_weather_forecast() -> dict:
-    rng = np.random.default_rng(seed=int(now_cairo().strftime("%Y%m%d")))
-    conditions = ["Clear Sky ☀️", "Partly Cloudy 🌤", "Overcast ☁️", "Light Haze 🌫"]
-    weights    = [0.45, 0.30, 0.15, 0.10]
-    idx        = rng.choice(len(conditions), p=weights)
-    sky        = conditions[idx]
-    eff_map = {
-        "Clear Sky ☀️":    0.95,
-        "Partly Cloudy 🌤": 0.72,
-        "Overcast ☁️":     0.45,
-        "Light Haze 🌫":   0.60,
-    }
-    atm_temp      = round(rng.uniform(22, 38), 1)
-    radiation_eff = eff_map[sky]
-    return {
-        "sky":            sky,
-        "atm_temp":       atm_temp,
-        "radiation_eff":  radiation_eff,
-        "description":    f"Tomorrow: {sky} · {atm_temp}°C · Solar radiation {int(radiation_eff*100)}%",
-    }
+    """Kept for backward compatibility — now delegates to live API."""
+    return fetch_weather_forecast()
 
 
 # ─────────────────────────────────────────
@@ -698,16 +766,15 @@ class PVDashboard:
     def classify(self, df: pd.DataFrame) -> pd.DataFrame:
         out = []
         for _, row in df.iterrows():
-            h     = row["time"].hour
-            night = h > 19 or h < 6
             v, a, uv, uv_id, dust, soc = (
                 row["V_PV"], row["Amp"], row["UV"],
                 row.get("UV_Ideal", row["UV"]), row["Dust"], row["SOC"]
             )
+            vd = v - row["V_Batt"]
             night = is_night_time(row["time"])
             if night:
-                # ── ليلاً: بس Soiling + حالة البطارية ──
-                if dust > 40:
+                # Night: check Soiling + battery health only
+                if dust > 60:
                     s = "Soiling Detected"
                 elif soc <= 30:
                     s = "Critical Battery"
@@ -716,7 +783,7 @@ class PVDashboard:
                 else:
                     s = "Night — Normal"
             else:
-                # ── فترة الإنتاج: كل المشاكل ──
+                # Production: all fault types
                 is_dl = uv_id > 3.0
                 if v < 2.0 and is_dl:
                     s = "Disconnected"
@@ -724,12 +791,18 @@ class PVDashboard:
                     s = "Short Circuit"
                 elif v > 22.0 or a < -0.1:
                     s = "Sensor Fault"
-                elif uv < 1.0 and uv_id > 1.0:
-                    s = "Critical Shading"
-                elif dust > 40:
+                # Shading split: industrial (permanent) vs cloud (temporary)
+                elif uv < 1.0 and uv_id > 3.0:
+                    s = "Industrial Shading"
+                elif uv < (uv_id * 0.55) and uv_id > 2.0:
+                    s = "Cloud Shading"
+                elif dust > 60:
                     s = "Soiling Detected"
                 elif soc >= 100:
                     s = "Battery Full"
+                # Early ramp-up: V_PV close to V_Batt, current near zero
+                elif vd < 1.5 and a < 0.2 and is_dl and soc < 100:
+                    s = "Normal — Ramp Up"
                 else:
                     s = "Normal"
             out.append(s)
@@ -775,73 +848,120 @@ class PVDashboard:
     ) -> tuple:
 
         # ══════════════════════════════════════
-        #  NIGHT MODE  (بعد 7:30 م — قبل 6 ص)
+        #  NIGHT MODE  (after 7:30 PM — before 6 AM)
         # ══════════════════════════════════════
         if is_night:
-            # Soiling يُكتشف ليلاً — الغبار مش بيختفي بالليل
-            if dust > 40:
+            # Soiling can be detected at night — dust doesn't go away
+            if dust > 60:
                 return (
                     "Soiling Detected", "warn", st.warning,
-                    f"⚠️ **Soiling Detected** — Dust {dust:.0f}% · يُنصح بالتنظيف قبل الفجر.", None,
+                    f"⚠️ **Soiling Detected** — Dust ratio {dust:.0f}% (above 60% threshold). "
+                    "Cleaning recommended before sunrise.", None,
                 )
-            # بطارية حرجة — وقف الحمل فوراً
+            # Critical battery — disconnect load immediately
             if soc <= 30.0:
                 fd = (
-                    "🔴 <b>Critical Battery</b> — افصل حمل الصوبة فوراً للحفاظ على البطارية."
+                    "🔴 <b>Critical Battery</b> — Disconnect the greenhouse load immediately "
+                    "to protect the battery from deep discharge."
                 )
                 return (
                     "Critical Battery", "crit", st.error,
-                    f"🛑 **CRITICAL — Battery {soc:.1f}%** — افصل الحمل من البطارية الآن!", fd,
+                    f"🛑 **CRITICAL — Battery at {soc:.1f}%** — "
+                    "Disconnect greenhouse load from battery NOW!", fd,
                 )
-            # بطارية منخفضة — تحذير مبكر
+            # Low battery — early warning
             if soc <= 40.0:
                 return (
                     "Night — Battery Low", "warn", st.warning,
-                    f"⚠️ **Night — Battery Low {soc:.1f}%** — تقترب من 30%، راقب الحمل.", None,
+                    f"⚠️ **Night — Battery Low ({soc:.1f}%)** — "
+                    "Approaching critical 30% threshold. Monitor load carefully.", None,
                 )
             return (
                 "Night — Normal", "ok", st.info,
-                f"🌙 Night Normal — SOC {soc:.1f}% · {v_batt:.2f} V", None,
+                f"🌙 Night — Normal operation · SOC {soc:.1f}% · {v_batt:.2f} V", None,
             )
 
         # ══════════════════════════════════════
-        #  PRODUCTION MODE  (6 ص — 7:30 م)
+        #  PRODUCTION MODE  (6 AM — 7:30 PM)
         # ══════════════════════════════════════
         if not connected and mode == "📡 Live ThingSpeak":
-            return status, "warn", st.warning, f"⚠️ Stale data — Last known: **{status}**", None
+            return status, "warn", st.warning, f"⚠️ Stale data — Last known status: **{status}**", None
 
-        # بطارية ممتلئة — ابدأ فترة النايت مود جاهزاً
+        # Battery fully charged — ready to feed greenhouse at night
         if soc >= 100.0:
             return (
                 "Battery Full", "ok", st.success,
-                "✅ **البطارية اتملت 100%** — النظام يغذي حمل الصوبة. جاهز لفترة الليل.", None,
+                "✅ **Battery Fully Charged (100%)** — "
+                "Solar panel is now producing excess power. "
+                "You can redirect the load to another circuit or divert energy.", None,
             )
 
-        # UV_IDEAL للتأكد من وجود شمس — مش UV_ACTUAL اللي قد يكون منخفض بسبب الخلل
+        # UV_IDEAL confirms daylight — not affected by actual shading
         is_daylight = uv_ideal > 3.0
 
+        # ── Early-production low-current window ──
+        # First ~30 min of production: V_PV ≈ V_Batt so current ≈ 0 — this is NORMAL
+        is_early_production = (
+            is_daylight
+            and vd < 1.5          # PV voltage still close to battery voltage
+            and amp < 0.2
+            and soc < 100.0
+        )
+        if is_early_production:
+            return (
+                "Normal — Ramp Up", "ok", st.info,
+                f"🌅 **Normal — Ramp-Up Phase** — "
+                f"PV voltage ({v_pv:.1f} V) is approaching battery voltage ({v_batt:.1f} V). "
+                "Current is near zero — this is expected at the start of production.", None,
+            )
+
         if v_pv < 5.5 and amp < 0.15 and is_daylight:
-            fd = "🔴 <b>Short Circuit</b> — PV collapsed. Disconnect & inspect wiring."
-            return "Short Circuit", "crit", st.error, "🚨 **Short Circuit** detected.", fd
+            fd = "🔴 <b>Short Circuit</b> — PV voltage collapsed. Disconnect panel and inspect all wiring and fuses."
+            return "Short Circuit", "crit", st.error, "🚨 **Short Circuit** detected — PV output near zero.", fd
 
         if v_pv < 2.0 and is_daylight:
-            fd = "🔴 <b>Disconnection</b> — PV near-zero in daylight. Check MC4 connectors."
-            return "Disconnected", "crit", st.error, "🔌 **Disconnected** — Panel not feeding.", fd
+            fd = "🔴 <b>Disconnection</b> — PV near-zero voltage in daylight. Check MC4 connectors and DC breaker."
+            return "Disconnected", "crit", st.error, "🔌 **Disconnected** — Panel is not feeding the system.", fd
 
         if v_pv > 22.0 or amp < -0.1:
-            fd = "🟡 <b>Sensor Fault</b> — Readings out of range. Verify wiring."
-            return "Sensor Fault", "warn", st.warning, "⚙️ **Sensor Fault** detected.", fd
+            fd = "🟡 <b>Sensor Fault</b> — Readings are out of expected range. Verify sensor wiring and calibration."
+            return "Sensor Fault", "warn", st.warning, "⚙️ **Sensor Fault** — Electrical readings out of range.", fd
 
-        # شادينج: UV_ACTUAL منخفض وUV_IDEAL مرتفع — في ضوء بس مش واصل للبانيل
-        if uv < 1.0 and uv_ideal > 1.0:
-            return "Critical Shading", "crit", st.error, "🚨 **Critical Shading** — UV near zero.", None
+        # ── Shading detection — split Industrial vs Cloud ──
+        if uv < 1.0 and uv_ideal > 3.0:
+            # Very low UV_ACTUAL vs high UV_IDEAL → permanent obstruction (industrial shading)
+            fd = (
+                "🔴 <b>Industrial / Permanent Shading</b> — UV_Actual is near-zero while UV_Ideal is high. "
+                "A fixed obstruction (building, tree, structure) is likely blocking the panel. "
+                "Inspect panel surroundings and reposition if possible."
+            )
+            return (
+                "Industrial Shading", "crit", st.error,
+                "🚨 **Industrial Shading** — Panel blocked by a permanent obstruction.", fd,
+            )
+        if 1.0 <= uv < (uv_ideal * 0.55) and uv_ideal > 2.0:
+            # Partial UV reduction → cloud / haze shading (temporary)
+            fd = (
+                "🟡 <b>Cloud / Haze Shading</b> — UV_Actual is significantly below UV_Ideal. "
+                "Passing clouds or atmospheric haze are reducing irradiance. "
+                "This is temporary — no physical action required."
+            )
+            return (
+                "Cloud Shading", "warn", st.warning,
+                f"⛅ **Cloud Shading** — UV {uv:.1f} vs Ideal {uv_ideal:.1f}. "
+                "Temporary irradiance reduction due to clouds or haze.", fd,
+            )
 
-        # Soiling مستقل — مش مشروط بحاجة
-        if dust > 40:
-            return "Soiling Detected", "warn", st.warning, "⚠️ **Soiling** — Cleaning recommended.", None
+        # ── Soiling — dust ratio above 60 % ──
+        if dust > 60:
+            return (
+                "Soiling Detected", "warn", st.warning,
+                f"⚠️ **Soiling Detected** — Dust ratio {dust:.0f}% (above 60% threshold). "
+                "Panel cleaning is recommended to restore output.", None,
+            )
 
         if "Normal" in status:
-            return status, "ok", st.success, f"✅ **{status}** — System optimal.", None
+            return status, "ok", st.success, f"✅ **{status}** — System operating optimally.", None
 
         return status, "crit", st.error, f"⚠️ **{status}**", None
 
@@ -990,9 +1110,9 @@ class PVDashboard:
         ))
         st.plotly_chart(fig, use_container_width=True, key="batt_home")
         if soc >= 100:
-            st.success("✅ Battery Fully Charged — Feeding Greenhouse.")
+            st.success("✅ Battery Fully Charged — Excess power available for redirection.")
         elif soc <= 30 and is_night:
-            st.error(f"🛑 CRITICAL — Battery {soc:.1f}%")
+            st.error(f"🛑 CRITICAL — Battery {soc:.1f}% — Disconnect load now!")
         elif is_night:
             st.info(f"🌙 Night discharge — SOC {soc:.1f}% · {v_batt:.2f} V")
 
@@ -1511,15 +1631,15 @@ class PVDashboard:
                         )
 
             if soc >= 100:
-                st.success("✅ Battery Fully Charged (100%) — Controller feeding Greenhouse load.")
+                st.success("✅ Battery Fully Charged (100%) — Solar panel power can be redirected to another load.")
             elif soc <= 30 and is_night:
-                st.error(f"🛑 CRITICAL — Battery {soc:.1f}% at night. Disconnect load immediately.")
+                st.error(f"🛑 CRITICAL — Battery at {soc:.1f}% during night. Disconnect greenhouse load immediately to protect the battery.")
             elif soc <= 40 and is_night:
-                st.warning(f"⚠️ Night — Battery {soc:.1f}% — approaching critical 30%.")
+                st.warning(f"⚠️ Night — Battery Low ({soc:.1f}%) — Approaching critical 30% threshold. Monitor load.")
             elif is_night:
-                st.info(f"🌙 Night discharge — SOC {soc:.1f}% · {v_batt:.2f} V")
+                st.info(f"🌙 Night discharge in progress — SOC {soc:.1f}% · {v_batt:.2f} V")
             elif is_prod:
-                st.info(f"⚡ Charging in progress — SOC {soc:.1f}% · {v_batt:.2f} V")
+                st.info(f"⚡ Charging from solar panel — SOC {soc:.1f}% · {v_batt:.2f} V")
             st.markdown("</div>", unsafe_allow_html=True)
 
     # ─────────────────────────────────────
@@ -1636,13 +1756,27 @@ class PVDashboard:
                     unsafe_allow_html=True,
                 )
 
-            # ── FIX 4B: Weather Forecast ──
+            # ── FIX 4B: Weather Forecast (Live Open-Meteo API) ──
             st.markdown(
                 """<div class='mn-section'><span style='font-size:1rem'>🌤</span>
 <span class='mn-section-title'>Tomorrow's Weather Forecast</span></div>""",
                 unsafe_allow_html=True,
             )
-            weather = simulate_weather_forecast()
+            weather = fetch_weather_forecast()
+            src_badge = (
+                "<span style='background:rgba(45,138,62,.1);color:#2d8a3e;padding:2px 10px;"
+                "border-radius:6px;font-size:.62rem;font-weight:700;border:1px solid rgba(45,138,62,.25);'>"
+                f"📡 {weather.get('source','Live')}</span>"
+                if "Live" in weather.get("source","")
+                else
+                "<span style='background:rgba(212,160,48,.1);color:#c47a1e;padding:2px 10px;"
+                "border-radius:6px;font-size:.62rem;font-weight:700;border:1px solid rgba(212,160,48,.25);'>"
+                f"📶 {weather.get('source','Estimated')}</span>"
+            )
+            st.markdown(
+                f"<div style='margin-bottom:10px;'>{src_badge}</div>",
+                unsafe_allow_html=True,
+            )
             wc1, wc2, wc3 = st.columns(3)
             sky_icon = {
                 "Clear Sky ☀️": "☀️", "Partly Cloudy 🌤": "🌤",
