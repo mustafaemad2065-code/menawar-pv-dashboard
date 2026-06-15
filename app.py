@@ -783,17 +783,20 @@ class PVDashboard:
                     s = "Night — Normal"
             else:
                 # Production: all fault types
-                is_dl = uv_id > 3.0
+                uv_id_avail = uv_id > 0.5
+                if uv_id_avail:
+                    is_dl = uv_id > 3.0
+                else:
+                    is_dl = True and v > 1.0   # time-based: already in production block + v_pv must show something
                 if v < 2.0 and is_dl:
                     s = "Disconnected"
                 elif v < 5.5 and a < 0.15 and is_dl:
                     s = "Short Circuit"
                 elif v > 22.0 or a < -0.1:
                     s = "Sensor Fault"
-                # Shading split: industrial (permanent) vs cloud (temporary)
-                elif uv < 1.0 and uv_id > 3.0:
+                elif uv_id_avail and uv < 1.0 and uv_id > 3.0:
                     s = "Industrial Shading"
-                elif uv < (uv_id * 0.55) and uv_id > 2.0:
+                elif uv_id_avail and uv < (uv_id * 0.55) and uv_id > 2.0:
                     s = "Cloud Shading"
                 elif dust > 60:
                     s = "Soiling Detected"
@@ -894,8 +897,21 @@ class PVDashboard:
                 "You can redirect the load to another circuit or divert energy.", None,
             )
 
-        # UV_IDEAL confirms daylight — not affected by actual shading
-        is_daylight = uv_ideal > 3.0
+        # UV_IDEAL confirms daylight.
+        # If field6 is missing (0), fall back to time only — but require stronger
+        # electrical evidence before flagging Disconnect / Short Circuit,
+        # because we can't use UV to cross-verify.
+        uv_ideal_available = uv_ideal > 0.5   # field6 is actually sending data
+        is_daylight_uv   = uv_ideal > 3.0
+        is_daylight_time = not is_night        # time-based fallback
+
+        if uv_ideal_available:
+            # UV sensor active — use it as the primary daylight confirmation
+            is_daylight = is_daylight_uv
+        else:
+            # UV sensor absent — daylight only confirmed by time AND v_pv shows
+            # some voltage (proves panel exists and isn't just noise)
+            is_daylight = is_daylight_time and v_pv > 1.0
 
         if v_pv < 5.5 and amp < 0.15 and is_daylight:
             fd = "🔴 <b>Short Circuit</b> — PV voltage collapsed. Disconnect panel and inspect all wiring and fuses."
@@ -909,30 +925,29 @@ class PVDashboard:
             fd = "🟡 <b>Sensor Fault</b> — Readings are out of expected range. Verify sensor wiring and calibration."
             return "Sensor Fault", "warn", st.warning, "⚙️ **Sensor Fault** — Electrical readings out of range.", fd
 
-        # ── Shading detection — split Industrial vs Cloud ──
-        if uv < 1.0 and uv_ideal > 3.0:
-            # Very low UV_ACTUAL vs high UV_IDEAL → permanent obstruction (industrial shading)
-            fd = (
-                "🔴 <b>Industrial / Permanent Shading</b> — UV_Actual is near-zero while UV_Ideal is high. "
-                "A fixed obstruction (building, tree, structure) is likely blocking the panel. "
-                "Inspect panel surroundings and reposition if possible."
-            )
-            return (
-                "Industrial Shading", "crit", st.error,
-                "🚨 **Industrial Shading** — Panel blocked by a permanent obstruction.", fd,
-            )
-        if 1.0 <= uv < (uv_ideal * 0.55) and uv_ideal > 2.0:
-            # Partial UV reduction → cloud / haze shading (temporary)
-            fd = (
-                "🟡 <b>Cloud / Haze Shading</b> — UV_Actual is significantly below UV_Ideal. "
-                "Passing clouds or atmospheric haze are reducing irradiance. "
-                "This is temporary — no physical action required."
-            )
-            return (
-                "Cloud Shading", "warn", st.warning,
-                f"⛅ **Cloud Shading** — UV {uv:.1f} vs Ideal {uv_ideal:.1f}. "
-                "Temporary irradiance reduction due to clouds or haze.", fd,
-            )
+        # ── Shading detection — only when uv_ideal sensor is active ──
+        if uv_ideal_available:
+            if uv < 1.0 and uv_ideal > 3.0:
+                fd = (
+                    "🔴 <b>Industrial / Permanent Shading</b> — UV_Actual is near-zero while UV_Ideal is high. "
+                    "A fixed obstruction (building, tree, structure) is likely blocking the panel. "
+                    "Inspect panel surroundings and reposition if possible."
+                )
+                return (
+                    "Industrial Shading", "crit", st.error,
+                    "🚨 **Industrial Shading** — Panel blocked by a permanent obstruction.", fd,
+                )
+            if 1.0 <= uv < (uv_ideal * 0.55) and uv_ideal > 2.0:
+                fd = (
+                    "🟡 <b>Cloud / Haze Shading</b> — UV_Actual is significantly below UV_Ideal. "
+                    "Passing clouds or atmospheric haze are reducing irradiance. "
+                    "This is temporary — no physical action required."
+                )
+                return (
+                    "Cloud Shading", "warn", st.warning,
+                    f"⛅ **Cloud Shading** — UV {uv:.1f} vs Ideal {uv_ideal:.1f}. "
+                    "Temporary irradiance reduction due to clouds or haze.", fd,
+                )
 
         # ── Soiling — dust ratio above 60 % ──
         if dust > 60:
