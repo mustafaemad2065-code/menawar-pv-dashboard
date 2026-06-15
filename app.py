@@ -29,248 +29,325 @@ st.set_page_config(
 #  FIX 3 — LOCK LIGHT THEME: injected immediately, before anything
 #  else renders.  All dark-mode CSS blocks have been removed.
 # ═══════════════════════════════════════════════════════════════════
-def inject_css() -> None:
+def inject_css(night_mode: bool = False) -> None:
+    if night_mode:
+        # ══ NIGHT MODE PALETTE ══
+        bg_main      = "#0d1a0f"   # very dark green-black
+        bg_card      = "#121f14"
+        bg_sidebar   = "#0a1510"
+        bg_row       = "#111c13"
+        bg_input     = "#111c13"
+        border_main  = "rgba(80,160,50,.18)"
+        border_card  = "rgba(80,160,50,.15)"
+        text_primary = "#c8e6c0"
+        text_muted   = "#6a9460"
+        text_heading = "#7ec86a"
+        accent1      = "#4caf50"
+        accent2      = "#b8860b"
+        metric_bg    = "#0f1c11"
+        metric_val   = "#7ec86a"
+        metric_lbl   = "#4a7a40"
+        tab_active   = "#4caf50"
+        btn_bg       = "#121f14"
+        btn_border   = "rgba(80,160,50,.40)"
+        btn_color    = "#7ec86a"
+        scrollbar_bg = "#0a1510"
+        scrollbar_th = "rgba(80,160,50,.45)"
+        alert_bg     = "#0f1c11"
+        hour_card_bg = "#121f14"
+        divider      = "linear-gradient(90deg,transparent,#2d6a2d,#b8860b,#3a7d1e,transparent)"
+        plot_font    = "#7ec86a"
+        grid_color   = "rgba(80,160,50,0.10)"
+        select_bg    = "#121f14"
+        select_text  = "#c8e6c0"
+        conn_s_bg    = "rgba(45,138,62,.10)"
+        conn_s_brd   = "rgba(45,138,62,.30)"
+        conn_e_bg    = "rgba(220,38,38,.08)"
+        conn_e_brd   = "rgba(220,38,38,.28)"
+        section_brd  = "rgba(80,160,50,.18)"
+        card_top     = "linear-gradient(90deg,#2d6a2d,#b8860b,#3a7d1e)"
+        logo_glow    = "drop-shadow(0 0 14px rgba(80,160,50,.65)) drop-shadow(0 0 8px rgba(184,134,11,.55))"
+        logo_glow2   = "drop-shadow(0 0 4px rgba(80,160,50,.30))"
+    else:
+        # ══ DAY / PRODUCTION MODE PALETTE ══
+        bg_main      = "#f4f7f2"
+        bg_card      = "#ffffff"
+        bg_sidebar   = "#ffffff"
+        bg_row       = "#f8faf6"
+        bg_input     = "#f8faf6"
+        border_main  = "rgba(58,125,30,.14)"
+        border_card  = "rgba(58,125,30,.14)"
+        text_primary = "#1a2e12"
+        text_muted   = "#4a6741"
+        text_heading = "#2d6a2d"
+        accent1      = "#3a7d1e"
+        accent2      = "#d4a030"
+        metric_bg    = "#ffffff"
+        metric_val   = "#2d6a2d"
+        metric_lbl   = "#4a6741"
+        tab_active   = "#3a7d1e"
+        btn_bg       = "#ffffff"
+        btn_border   = "rgba(58,125,30,.35)"
+        btn_color    = "#3a7d1e"
+        scrollbar_bg = "#eaf0e6"
+        scrollbar_th = "rgba(58,125,30,.35)"
+        alert_bg     = "#f8faf6"
+        hour_card_bg = "#ffffff"
+        divider      = "linear-gradient(90deg,transparent,#3a7d1e,#d4a030,#5aad2e,transparent)"
+        plot_font    = "#2d5a1a"
+        grid_color   = "rgba(58,125,30,0.09)"
+        select_bg    = "#ffffff"
+        select_text  = "#1a2e12"
+        conn_s_bg    = "rgba(45,138,62,.07)"
+        conn_s_brd   = "rgba(45,138,62,.30)"
+        conn_e_bg    = "rgba(220,38,38,.06)"
+        conn_e_brd   = "rgba(220,38,38,.28)"
+        section_brd  = "rgba(58,125,30,.14)"
+        card_top     = "linear-gradient(90deg,#3a7d1e,#d4a030,#5aad2e)"
+        logo_glow    = "drop-shadow(0 0 14px rgba(58,125,30,.75)) drop-shadow(0 0 8px rgba(212,160,48,.65))"
+        logo_glow2   = "drop-shadow(0 0 4px rgba(58,125,30,.35))"
+
     st.markdown(
-        """
+        f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
-/* ══ FORCE LIGHT THEME — ALL CONTEXTS ══ */
+/* ══ THEME BASE ══ */
 :root,html,body,
 [data-theme="light"],[data-theme="dark"],
 .stApp,[data-testid="stAppViewContainer"],
-[data-testid="stMain"],.main{
-  background:#f4f7f2 !important;
-  color:#1a2e12       !important;
+[data-testid="stMain"],.main{{
+  background:{bg_main} !important;
+  color:{text_primary} !important;
   font-family:'Plus Jakarta Sans',sans-serif !important;
-}
+}}
 
 /* ── SIDEBAR ── */
-[data-testid="stSidebar"]{
-  background:#ffffff !important;
-  border-right:1.5px solid rgba(58,125,30,.14) !important;
-  box-shadow:2px 0 16px rgba(45,90,22,.07)    !important;
-}
-[data-testid="stSidebar"] *{color:#1a2e12 !important;}
+[data-testid="stSidebar"]{{
+  background:{bg_sidebar} !important;
+  border-right:1.5px solid {border_main} !important;
+  box-shadow:2px 0 16px rgba(0,0,0,.18) !important;
+}}
+[data-testid="stSidebar"] *{{color:{text_primary} !important;}}
 [data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3{
-  color:#2d6a2d !important;
+[data-testid="stSidebar"] h3{{
+  color:{text_heading} !important;
   font-family:'Space Grotesk',sans-serif !important;
   font-size:.7rem !important;
   letter-spacing:1.5px;
   text-transform:uppercase;
-}
+}}
 
 /* ── METRICS ── */
-[data-testid="stMetric"]{
-  background:#ffffff !important;
-  border:1px solid rgba(58,125,30,.14) !important;
+[data-testid="stMetric"]{{
+  background:{metric_bg} !important;
+  border:1px solid {border_main} !important;
   border-radius:14px !important;
   padding:16px 18px !important;
-  box-shadow:0 1px 4px rgba(45,90,22,.08),0 4px 16px rgba(45,90,22,.05) !important;
+  box-shadow:0 1px 4px rgba(0,0,0,.12),0 4px 16px rgba(0,0,0,.08) !important;
   transition:transform .2s,box-shadow .2s;
   position:relative;
-}
-[data-testid="stMetric"]:hover{
+}}
+[data-testid="stMetric"]:hover{{
   transform:translateY(-2px);
-  box-shadow:0 4px 14px rgba(45,90,22,.12),0 8px 32px rgba(45,90,22,.07) !important;
-}
-[data-testid="stMetric"]::before{
+  box-shadow:0 4px 14px rgba(0,0,0,.18),0 8px 32px rgba(0,0,0,.10) !important;
+}}
+[data-testid="stMetric"]::before{{
   content:'';position:absolute;top:0;left:0;right:0;height:3px;
-  background:linear-gradient(90deg,#3a7d1e,#d4a030);
+  background:{card_top};
   border-radius:14px 14px 0 0;
-}
-[data-testid="stMetricLabel"]>div{
-  color:#4a6741 !important;
+}}
+[data-testid="stMetricLabel"]>div{{
+  color:{metric_lbl} !important;
   font-size:.65rem !important;
   font-weight:600 !important;
   letter-spacing:1px;
   text-transform:uppercase;
-}
-[data-testid="stMetricValue"]{
-  color:#2d6a2d !important;
+}}
+[data-testid="stMetricValue"]{{
+  color:{metric_val} !important;
   font-family:'Space Grotesk',sans-serif !important;
   font-size:1.45rem !important;
   font-weight:700 !important;
-}
-[data-testid="stMetricDelta"]{font-size:.7rem !important;color:#4a6741 !important;}
+}}
+[data-testid="stMetricDelta"]{{font-size:.7rem !important;color:{text_muted} !important;}}
 
 /* ── TABS ── */
-[data-testid="stTabs"] [role="tab"]{
+[data-testid="stTabs"] [role="tab"]{{
   font-family:'Space Grotesk',sans-serif !important;
   font-size:.68rem !important;
   letter-spacing:1px;text-transform:uppercase;
-  color:#4a6741 !important;
+  color:{text_muted} !important;
   padding:10px 18px !important;
   background:transparent !important;
-}
-[data-testid="stTabs"] [role="tab"][aria-selected="true"]{
-  color:#3a7d1e !important;
-  border-bottom:2px solid #3a7d1e !important;
+}}
+[data-testid="stTabs"] [role="tab"][aria-selected="true"]{{
+  color:{tab_active} !important;
+  border-bottom:2px solid {tab_active} !important;
   font-weight:700 !important;
-}
-[data-testid="stTabsContent"]{background:transparent !important;}
+}}
+[data-testid="stTabsContent"]{{background:transparent !important;}}
 
 /* ── BUTTONS ── */
-.stButton button{
-  background:#ffffff !important;
-  border:1.5px solid rgba(58,125,30,.35) !important;
-  color:#3a7d1e !important;
+.stButton button{{
+  background:{btn_bg} !important;
+  border:1.5px solid {btn_border} !important;
+  color:{btn_color} !important;
   font-family:'Space Grotesk',sans-serif !important;
   font-size:.65rem !important;
   letter-spacing:1px;font-weight:600 !important;
   border-radius:10px !important;
   transition:all .2s !important;
-  box-shadow:0 1px 4px rgba(45,90,22,.08) !important;
-}
-.stButton button:hover{
-  background:rgba(58,125,30,.07) !important;
-  border-color:#3a7d1e !important;
-  color:#2d5a16 !important;
+  box-shadow:0 1px 4px rgba(0,0,0,.10) !important;
+}}
+.stButton button:hover{{
+  background:rgba(80,160,50,.09) !important;
+  border-color:{accent1} !important;
+  color:{accent1} !important;
   transform:translateY(-1px) !important;
-}
-.stButton button[kind="primary"]{
-  background:linear-gradient(135deg,#2d6a2d,#3a7d1e) !important;
+}}
+.stButton button[kind="primary"]{{
+  background:linear-gradient(135deg,#1a4a1a,{accent1}) !important;
   color:#ffffff !important;border:none !important;
-}
-.stButton button[kind="primary"]:hover{opacity:.92 !important;color:#ffffff !important;}
+}}
+.stButton button[kind="primary"]:hover{{opacity:.92 !important;color:#ffffff !important;}}
 
 /* ── CARDS ── */
-.mn-card{
-  background:#ffffff;
-  border:1px solid rgba(58,125,30,.14);
+.mn-card{{
+  background:{bg_card};
+  border:1px solid {border_card};
   border-radius:16px;
   padding:20px 24px;
   position:relative;overflow:hidden;
-  box-shadow:0 1px 4px rgba(45,90,22,.08),0 4px 16px rgba(45,90,22,.05);
+  box-shadow:0 1px 4px rgba(0,0,0,.10),0 4px 16px rgba(0,0,0,.07);
   transition:transform .2s,box-shadow .2s;
   margin-bottom:10px;
-  color:#1a2e12;
-}
-.mn-card:hover{
+  color:{text_primary};
+}}
+.mn-card:hover{{
   transform:translateY(-2px);
-  box-shadow:0 4px 14px rgba(45,90,22,.12),0 8px 32px rgba(45,90,22,.07);
-}
-.mn-card::before{
+  box-shadow:0 4px 14px rgba(0,0,0,.16),0 8px 32px rgba(0,0,0,.10);
+}}
+.mn-card::before{{
   content:'';
   position:absolute;top:0;left:0;right:0;height:3px;
-  background:linear-gradient(90deg,#3a7d1e,#d4a030,#5aad2e);
+  background:{card_top};
   border-radius:16px 16px 0 0;
-}
+}}
 
 /* ── CONNECTION STATUS CARDS ── */
-.conn-success-card{
-  background:rgba(45,138,62,.07);
-  border:1.5px solid rgba(45,138,62,.30);
+.conn-success-card{{
+  background:{conn_s_bg};
+  border:1.5px solid {conn_s_brd};
   border-radius:12px;padding:12px 16px;
   display:flex;align-items:center;gap:10px;margin:8px 0;
-}
-.conn-error-card{
-  background:rgba(220,38,38,.06);
-  border:1.5px solid rgba(220,38,38,.28);
+}}
+.conn-error-card{{
+  background:{conn_e_bg};
+  border:1.5px solid {conn_e_brd};
   border-radius:12px;padding:12px 16px;margin:8px 0;
-}
+}}
 
 /* ── SECTION HEADERS ── */
-.mn-section{
+.mn-section{{
   display:flex;align-items:center;gap:10px;
   margin:20px 0 16px 0;padding-bottom:10px;
-  border-bottom:1.5px solid rgba(58,125,30,.14);
-}
-.mn-section-title{
+  border-bottom:1.5px solid {section_brd};
+}}
+.mn-section-title{{
   font-family:'Space Grotesk',sans-serif;
   font-weight:700;font-size:.78rem;
-  color:#2d6a2d;letter-spacing:2px;text-transform:uppercase;
-}
+  color:{text_heading};letter-spacing:2px;text-transform:uppercase;
+}}
 
 /* ── LIST ROWS ── */
-.hr-row{
+.hr-row{{
   display:flex;align-items:center;gap:10px;
   padding:10px 14px;border-radius:10px;margin-bottom:4px;
-  background:#f8faf6;border:1px solid rgba(58,125,30,.12);
-  transition:background .15s,box-shadow .15s;color:#1a2e12;
-}
-.hr-row:hover{background:rgba(58,125,30,.05);box-shadow:0 1px 4px rgba(45,90,22,.08);}
+  background:{bg_row};border:1px solid {border_card};
+  transition:background .15s,box-shadow .15s;color:{text_primary};
+}}
+.hr-row:hover{{background:rgba(80,160,50,.06);box-shadow:0 1px 4px rgba(0,0,0,.10);}}
 
 /* ── INPUTS ── */
-[data-testid="stTextInput"] input{
-  background:#f8faf6 !important;
-  border:1.5px solid rgba(58,125,30,.18) !important;
-  color:#1a2e12 !important;border-radius:8px !important;font-size:.8rem !important;
-}
-[data-testid="stTextInput"] input:focus{
-  border-color:#3a7d1e !important;
-  box-shadow:0 0 0 3px rgba(58,125,30,.12) !important;
-}
-[data-testid="stTextInput"] label{color:#4a6741 !important;}
+[data-testid="stTextInput"] input{{
+  background:{bg_input} !important;
+  border:1.5px solid {border_main} !important;
+  color:{text_primary} !important;border-radius:8px !important;font-size:.8rem !important;
+}}
+[data-testid="stTextInput"] input:focus{{
+  border-color:{accent1} !important;
+  box-shadow:0 0 0 3px rgba(80,160,50,.15) !important;
+}}
+[data-testid="stTextInput"] label{{color:{text_muted} !important;}}
 
 /* ── SCROLLBAR ── */
-::-webkit-scrollbar{width:5px;}
-::-webkit-scrollbar-track{background:#eaf0e6;}
-::-webkit-scrollbar-thumb{background:rgba(58,125,30,.35);border-radius:3px;}
-::-webkit-scrollbar-thumb:hover{background:#3a7d1e;}
+::-webkit-scrollbar{{width:5px;}}
+::-webkit-scrollbar-track{{background:{scrollbar_bg};}}
+::-webkit-scrollbar-thumb{{background:{scrollbar_th};border-radius:3px;}}
+::-webkit-scrollbar-thumb:hover{{background:{accent1};}}
 
 /* ── ANIMATIONS ── */
-@keyframes mnGlow{
-  0%  {filter:drop-shadow(0 0 4px rgba(58,125,30,.35)) drop-shadow(0 0 2px rgba(212,160,48,.3));}
-  50% {filter:drop-shadow(0 0 14px rgba(58,125,30,.75)) drop-shadow(0 0 8px rgba(212,160,48,.65));}
-  100%{filter:drop-shadow(0 0 4px rgba(58,125,30,.35)) drop-shadow(0 0 2px rgba(212,160,48,.3));}
-}
-@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
-@keyframes slideIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+@keyframes mnGlow{{
+  0%  {{filter:{logo_glow2};}}
+  50% {{filter:{logo_glow};}}
+  100%{{filter:{logo_glow2};}}
+}}
+@keyframes pulse{{0%,100%{{opacity:1;}}50%{{opacity:.4;}}}}
+@keyframes slideIn{{from{{opacity:0;transform:translateY(8px);}}to{{opacity:1;transform:translateY(0);}}}}
 
-.mn-logo-anim{animation:mnGlow 3s ease-in-out infinite;}
-.online-dot{
+.mn-logo-anim{{animation:mnGlow 3s ease-in-out infinite;}}
+.online-dot{{
   display:inline-block;width:8px;height:8px;
   background:#2d8a3e;border-radius:50%;
   animation:pulse 2s infinite;box-shadow:0 0 6px #2d8a3e;
-}
-.panel-content{animation:slideIn .22s ease-out;}
+}}
+.panel-content{{animation:slideIn .22s ease-out;}}
 
 /* ── ALERTS ── */
-[data-testid="stAlert"]{border-radius:12px !important;background:#f8faf6 !important;}
+[data-testid="stAlert"]{{border-radius:12px !important;background:{alert_bg} !important;}}
 
 /* ── RADIO / TOGGLES ── */
-[data-testid="stRadio"] label{font-size:.8rem !important;color:#1a2e12 !important;}
-[data-testid="stToggle"] label{font-size:.8rem !important;color:#1a2e12 !important;}
+[data-testid="stRadio"] label{{font-size:.8rem !important;color:{text_primary} !important;}}
+[data-testid="stToggle"] label{{font-size:.8rem !important;color:{text_primary} !important;}}
 
 /* ── PLOTLY CONTAINERS ── */
-.stPlotlyChart{background:transparent !important;}
-.js-plotly-plot .plotly .bg{fill:transparent !important;}
+.stPlotlyChart{{background:transparent !important;}}
+.js-plotly-plot .plotly .bg{{fill:transparent !important;}}
 
 /* ── FORECAST HOUR CARDS ── */
-.hour-card{
-  background:#ffffff;border:1px solid rgba(58,125,30,.14);
+.hour-card{{
+  background:{hour_card_bg};border:1px solid {border_card};
   border-radius:12px;padding:14px 8px;text-align:center;
-  box-shadow:0 1px 4px rgba(45,90,22,.07);color:#1a2e12;
-}
+  box-shadow:0 1px 4px rgba(0,0,0,.10);color:{text_primary};
+}}
 
 /* ── NAV BUTTON LABEL FIX ── */
-.stButton button p{margin:0 !important;}
+.stButton button p{{margin:0 !important;}}
 
 /* ── SELECTBOX / DROPDOWN ── */
-[data-baseweb="select"] *{color:#1a2e12 !important;background:#ffffff !important;}
+[data-baseweb="select"] *{{color:{select_text} !important;background:{select_bg} !important;}}
 
 /* ── HEADER GRADIENT DIVIDER ── */
-.mn-divider{
+.mn-divider{{
   height:2.5px;
-  background:linear-gradient(90deg,transparent,#3a7d1e,#d4a030,#5aad2e,transparent);
+  background:{divider};
   border-radius:2px;margin-bottom:18px;
-}
+}}
 
 /* ── STATUS PERIOD BADGE ── */
-.period-badge{
+.period-badge{{
   text-align:center;padding:9px 14px;border-radius:10px;
   font-family:'Space Grotesk',sans-serif;font-weight:700;
   letter-spacing:2px;font-size:.7rem;
-}
+}}
 
 /* ── MAIN BLOCK CONTAINER ── */
-.main .block-container{padding-top:1rem !important;}
+.main .block-container{{padding-top:1rem !important;}}
 
-/* ── ENSURE ALL TEXT STAYS DARK ON LIGHT BG ── */
-p,span,div,label,h1,h2,h3,h4,h5,h6,li{color:#1a2e12;}
-code{background:rgba(58,125,30,.08);color:#3a7d1e;}
+/* ── TEXT COLOR RESET FOR THEME ── */
+p,span,div,label,h1,h2,h3,h4,h5,h6,li{{color:{text_primary};}}
+code{{background:rgba(80,160,50,.10);color:{accent1};}}
 </style>
 """,
         unsafe_allow_html=True,
@@ -278,20 +355,30 @@ code{background:rgba(58,125,30,.08);color:#3a7d1e;}
 
 
 # ─────────────────────────────────────────
-#  PLOTLY LIGHT THEME CONSTANTS
+#  PLOTLY THEME CONSTANTS (dynamic per render)
 # ─────────────────────────────────────────
 PLOT_BG     = "rgba(0,0,0,0)"
 PAPER_BG    = "rgba(0,0,0,0)"
-GRID_COLOR  = "rgba(58,125,30,0.09)"
-FONT_COLOR  = "#2d5a1a"
-FONT_FAMILY = "Plus Jakarta Sans"
 
+def _is_night_mode() -> bool:
+    override = st.session_state.get("night_mode_override", "Auto")
+    if override == "Always Night 🌙": return True
+    if override == "Always Day ☀️":  return False
+    return is_night_time(now_cairo().time())
+
+def _theme():
+    if _is_night_mode():
+        return {"grid": "rgba(80,160,50,0.10)", "font": "#7ec86a"}
+    return {"grid": "rgba(58,125,30,0.09)",  "font": "#2d5a1a"}
 
 def light_layout(**kwargs) -> dict:
+    t = _theme()
+    GRID_COLOR  = t["grid"]
+    FONT_COLOR  = t["font"]
     base = dict(
         plot_bgcolor=PLOT_BG,
         paper_bgcolor=PAPER_BG,
-        font=dict(family=FONT_FAMILY, color=FONT_COLOR, size=10),
+        font=dict(family="Plus Jakarta Sans", color=FONT_COLOR, size=10),
         xaxis=dict(
             gridcolor=GRID_COLOR, linecolor=GRID_COLOR,
             tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR),
@@ -301,7 +388,7 @@ def light_layout(**kwargs) -> dict:
             tickfont=dict(color=FONT_COLOR), title_font=dict(color=FONT_COLOR),
         ),
         legend=dict(
-            bgcolor="rgba(255,255,255,0.85)", bordercolor=GRID_COLOR,
+            bgcolor="rgba(0,0,0,0.25)", bordercolor=GRID_COLOR,
             borderwidth=1, font=dict(color=FONT_COLOR, size=9),
         ),
         margin=dict(l=12, r=12, t=44, b=28),
@@ -988,9 +1075,9 @@ class PVDashboard:
             mode="gauge+number", value=soc,
             number={"suffix": "%", "font": {"size": 22, "family": "Space Grotesk", "color": sc}},
             gauge={
-                "axis": {"range": [0, 100], "tickcolor": FONT_COLOR, "tickfont": {"color": FONT_COLOR, "size": 9}},
+                "axis": {"range": [0, 100], "tickcolor": _theme()["font"], "tickfont": {"color": _theme()["font"], "size": 9}},
                 "bar": {"color": sc, "thickness": 0.28},
-                "bgcolor": "rgba(0,0,0,0)", "bordercolor": GRID_COLOR,
+                "bgcolor": "rgba(0,0,0,0)", "bordercolor": _theme()["grid"],
                 "steps": [
                     {"range": [0, 30],  "color": "rgba(220,38,38,0.07)"},
                     {"range": [30, 80], "color": "rgba(212,160,48,0.06)"},
@@ -1097,12 +1184,12 @@ class PVDashboard:
         fig.add_hline(y=30, line=dict(color="#dc2626", width=1, dash="dash"))
         fig.update_layout(**light_layout(
             height=230,
-            yaxis=dict(title="SOC (%)", range=[0, 105], gridcolor=GRID_COLOR, tickfont=dict(color=FONT_COLOR)),
+            yaxis=dict(title="SOC (%)", range=[0, 105], gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"])),
             yaxis2=dict(
                 title="Voltage (V)", overlaying="y", side="right", range=[10.5, 16],
                 gridcolor="rgba(0,0,0,0)", tickfont=dict(color="#d4a030"),
             ),
-            legend=dict(orientation="h", y=1.08, x=0, bgcolor="rgba(0,0,0,0)", font=dict(size=9, color=FONT_COLOR)),
+            legend=dict(orientation="h", y=1.08, x=0, bgcolor="rgba(0,0,0,0)", font=dict(size=9, color=_theme()["font"])),
             margin=dict(l=12, r=12, t=30, b=28),
         ))
         st.plotly_chart(fig, use_container_width=True, key="batt_home")
@@ -1339,8 +1426,8 @@ class PVDashboard:
                 fig_gantt.update_layout(**light_layout(
                     height=100,
                     yaxis=dict(visible=False),
-                    xaxis=dict(gridcolor=GRID_COLOR, tickfont=dict(size=9, color=FONT_COLOR), range=x_range),
-                    legend=dict(orientation="h", y=1.7, x=0, font=dict(size=9, color=FONT_COLOR), bgcolor="rgba(0,0,0,0)"),
+                    xaxis=dict(gridcolor=_theme()["grid"], tickfont=dict(size=9, color=_theme()["font"]), range=x_range),
+                    legend=dict(orientation="h", y=1.7, x=0, font=dict(size=9, color=_theme()["font"]), bgcolor="rgba(0,0,0,0)"),
                     margin=dict(l=10, r=10, t=50, b=10), hovermode="x unified",
                 ))
                 st.plotly_chart(fig_gantt, use_container_width=True, key="gantt")
@@ -1388,14 +1475,14 @@ class PVDashboard:
                 ), row=3, col=1)
                 fig.update_layout(**light_layout(
                     shapes=shapes, height=500,
-                    legend=dict(orientation="h", y=1.03, x=0, font=dict(size=9, color=FONT_COLOR), bgcolor="rgba(0,0,0,0)"),
+                    legend=dict(orientation="h", y=1.03, x=0, font=dict(size=9, color=_theme()["font"]), bgcolor="rgba(0,0,0,0)"),
                     margin=dict(l=12, r=12, t=50, b=20), hovermode="x unified",
                 ))
                 for i in range(1, 4):
-                    fig.update_xaxes(gridcolor=GRID_COLOR, tickfont=dict(color=FONT_COLOR), range=x_range, row=i, col=1)
-                    fig.update_yaxes(gridcolor=GRID_COLOR, tickfont=dict(color=FONT_COLOR), row=i, col=1)
+                    fig.update_xaxes(gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"]), range=x_range, row=i, col=1)
+                    fig.update_yaxes(gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"]), row=i, col=1)
                 for ann in fig.layout.annotations:
-                    ann.font.color = FONT_COLOR
+                    ann.font.color = _theme()["font"]
                 st.plotly_chart(fig, use_container_width=True, key="timeline_chart")
 
             with tab2:
@@ -1466,13 +1553,13 @@ class PVDashboard:
                         marker=dict(colors=sc_df["color"].tolist(),
                                     line=dict(color="rgba(255,255,255,0.2)", width=2)),
                         textinfo="label+percent",
-                        textfont=dict(size=9, family=FONT_FAMILY, color=FONT_COLOR),
+                        textfont=dict(size=9, family="Plus Jakarta Sans", color=_theme()["font"]),
                         hovertemplate="<b>%{label}</b><br>%{value:.1f}%<extra></extra>",
                     ))
                     fig3.update_layout(**light_layout(
                         showlegend=False, height=300,
                         margin=dict(l=10, r=10, t=40, b=10),
-                        title=dict(text="⏱ Time Spent per Status (%)", font=dict(size=11, color=FONT_COLOR)),
+                        title=dict(text="⏱ Time Spent per Status (%)", font=dict(size=11, color=_theme()["font"])),
                     ))
                     st.plotly_chart(fig3, use_container_width=True, key="pie_chart")
                 with cb:
@@ -1482,7 +1569,7 @@ class PVDashboard:
                         name="Time Spent (%)", x=fo["Status"], y=fo["time_pct"],
                         marker_color=fo["color"].tolist(), opacity=0.80,
                         text=[f"{v:.1f}%" for v in fo["time_pct"]], textposition="outside",
-                        textfont=dict(size=9, color=FONT_COLOR),
+                        textfont=dict(size=9, color=_theme()["font"]),
                     ))
                     fig4.add_trace(go.Bar(
                         name="Power Loss (%)", x=fo["Status"], y=fo["contrib"],
@@ -1493,9 +1580,9 @@ class PVDashboard:
                     fig4.update_layout(**light_layout(
                         barmode="group", height=300,
                         margin=dict(l=10, r=10, t=50, b=70),
-                        xaxis=dict(tickangle=-25, gridcolor=GRID_COLOR, tickfont=dict(color=FONT_COLOR)),
-                        legend=dict(orientation="h", y=1.15, bgcolor="rgba(0,0,0,0)", font=dict(size=9, color=FONT_COLOR)),
-                        title=dict(text="📊 Time vs Power Loss per Fault Cause", font=dict(size=11, color=FONT_COLOR)),
+                        xaxis=dict(tickangle=-25, gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"])),
+                        legend=dict(orientation="h", y=1.15, bgcolor="rgba(0,0,0,0)", font=dict(size=9, color=_theme()["font"])),
+                        title=dict(text="📊 Time vs Power Loss per Fault Cause", font=dict(size=11, color=_theme()["font"])),
                     ))
                     st.plotly_chart(fig4, use_container_width=True, key="bar_chart")
 
@@ -1584,13 +1671,13 @@ class PVDashboard:
             )
             fig.update_layout(**light_layout(
                 height=320,
-                xaxis=dict(gridcolor=GRID_COLOR, title="Time", range=["06:00", "20:00"], tickfont=dict(color=FONT_COLOR)),
-                yaxis=dict(title="SOC (%)", range=[0, 105], gridcolor=GRID_COLOR,
+                xaxis=dict(gridcolor=_theme()["grid"], title="Time", range=["06:00", "20:00"], tickfont=dict(color=_theme()["font"])),
+                yaxis=dict(title="SOC (%)", range=[0, 105], gridcolor=_theme()["grid"],
                            title_font=dict(color="#3a7d1e"), tickfont=dict(color="#3a7d1e")),
                 yaxis2=dict(title="Battery Voltage (V)", overlaying="y", side="right",
                             range=[10.5, 16], gridcolor="rgba(0,0,0,0)",
                             title_font=dict(color="#d4a030"), tickfont=dict(color="#d4a030")),
-                legend=dict(orientation="h", y=1.08, x=0, bgcolor="rgba(0,0,0,0)", font=dict(color=FONT_COLOR, size=9)),
+                legend=dict(orientation="h", y=1.08, x=0, bgcolor="rgba(0,0,0,0)", font=dict(color=_theme()["font"], size=9)),
                 margin=dict(l=12, r=12, t=40, b=40),
             ))
             st.plotly_chart(fig, use_container_width=True, key="battery_chart")
@@ -1853,18 +1940,18 @@ class PVDashboard:
             fig_fc.add_annotation(
                 x=hour_labels[peak_idx], y=pwr_proj[peak_idx],
                 text=f"Peak: {pwr_proj[peak_idx]:.1f}W",
-                showarrow=True, arrowhead=2, arrowsize=1, arrowcolor=FONT_COLOR,
-                font=dict(size=9, color=FONT_COLOR, family="Space Grotesk"),
+                showarrow=True, arrowhead=2, arrowsize=1, arrowcolor=_theme()["font"],
+                font=dict(size=9, color=_theme()["font"], family="Space Grotesk"),
                 bgcolor="rgba(212,160,48,0.12)", bordercolor="rgba(212,160,48,0.45)",
                 borderwidth=1, borderpad=4, ax=0, ay=-28,
             )
             fig_fc.update_layout(**light_layout(
                 height=320,
                 title=dict(text=f"📅 Tomorrow's Power Forecast — {weather['sky']}",
-                           font=dict(size=11, color=FONT_COLOR, family="Space Grotesk")),
-                xaxis=dict(gridcolor=GRID_COLOR, tickfont=dict(color=FONT_COLOR), title="Hour of Day"),
-                yaxis=dict(gridcolor=GRID_COLOR, tickfont=dict(color=FONT_COLOR), title="Power (W)", range=[0, 24]),
-                legend=dict(orientation="h", y=1.12, x=0, bgcolor="rgba(0,0,0,0)", font=dict(size=9, color=FONT_COLOR)),
+                           font=dict(size=11, color=_theme()["font"], family="Space Grotesk")),
+                xaxis=dict(gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"]), title="Hour of Day"),
+                yaxis=dict(gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"]), title="Power (W)", range=[0, 24]),
+                legend=dict(orientation="h", y=1.12, x=0, bgcolor="rgba(0,0,0,0)", font=dict(size=9, color=_theme()["font"])),
                 margin=dict(l=12, r=12, t=60, b=40),
             ))
             st.plotly_chart(fig_fc, use_container_width=True, key="forecast_dual_chart")
@@ -2289,8 +2376,19 @@ class PVDashboard:
         now      = now_cairo()
         prod_now = is_production_period(now.time())
 
-        # FIX 3: inject CSS (light-only) as very first Streamlit call
-        inject_css()
+        # ── Determine night mode: auto (time-based) OR manual override ──
+        auto_night = is_night_time(now.time())
+        # Read manual override from session state (set below in sidebar)
+        night_mode_override = st.session_state.get("night_mode_override", "Auto")
+        if night_mode_override == "Always Night 🌙":
+            night_mode = True
+        elif night_mode_override == "Always Day ☀️":
+            night_mode = False
+        else:
+            night_mode = auto_night
+
+        # FIX 3: inject CSS as very first Streamlit call
+        inject_css(night_mode=night_mode)
 
         # ══════════════════════════════════
         #  SIDEBAR
@@ -2459,6 +2557,32 @@ class PVDashboard:
             amp       = st.sidebar.number_input("Current (A)", value=1.1)
             uv_ideal_in = uv_in   # في السيميوليشن UV_IDEAL = UV_ACTUAL
             ideal_pwr = 20.0; pwr = None; is_connected = True
+
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("## 🌙 DISPLAY MODE")
+        st.sidebar.selectbox(
+            "Theme",
+            ["Auto (Time-Based)", "Always Night 🌙", "Always Day ☀️"],
+            key="night_mode_override",
+            help="Auto switches to night theme after 7:30 PM automatically.",
+        )
+        # Visual indicator
+        if night_mode:
+            st.sidebar.markdown(
+                "<div style='background:rgba(13,26,15,.6);border:1.5px solid rgba(80,160,50,.30);"
+                "border-radius:10px;padding:9px 14px;text-align:center;font-family:\"Space Grotesk\",sans-serif;"
+                "font-weight:700;font-size:.68rem;letter-spacing:2px;color:#7ec86a;margin-top:4px;'>"
+                "🌙 NIGHT MODE ACTIVE</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.sidebar.markdown(
+                "<div style='background:rgba(58,125,30,.07);border:1.5px solid rgba(58,125,30,.25);"
+                "border-radius:10px;padding:9px 14px;text-align:center;font-family:\"Space Grotesk\",sans-serif;"
+                "font-weight:700;font-size:.68rem;letter-spacing:2px;color:#3a7d1e;margin-top:4px;'>"
+                "☀️ DAY MODE ACTIVE</div>",
+                unsafe_allow_html=True,
+            )
 
         st.sidebar.markdown("---")
         is_night_now = is_night_time(now.time())
