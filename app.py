@@ -1181,13 +1181,21 @@ class PVDashboard:
         fig.add_hline(y=30, line=dict(color="#dc2626", width=1, dash="dash"))
         fig.update_layout(**light_layout(
             height=230,
+            xaxis=dict(
+                gridcolor=_theme()["grid"],
+                tickfont=dict(color=_theme()["font"], size=8),
+                tickmode="array",
+                tickvals=[f"{h:02d}:{m:02d}" for h in range(6, 21) for m in (0, 30) if not (h == 20 and m == 30)],
+                ticktext=[f"{h:02d}:{m:02d}" for h in range(6, 21) for m in (0, 30) if not (h == 20 and m == 30)],
+                tickangle=-45,
+            ),
             yaxis=dict(title="SOC (%)", range=[0, 105], gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"])),
             yaxis2=dict(
                 title="Voltage (V)", overlaying="y", side="right", range=[10.5, 16],
                 gridcolor="rgba(0,0,0,0)", tickfont=dict(color="#d4a030"),
             ),
             legend=dict(orientation="h", y=1.08, x=0, bgcolor="rgba(0,0,0,0)", font=dict(size=9, color=_theme()["font"])),
-            margin=dict(l=12, r=12, t=30, b=28),
+            margin=dict(l=12, r=12, t=30, b=50),
         ))
         st.plotly_chart(fig, use_container_width=True, key="batt_home")
         if soc >= 100:
@@ -1668,14 +1676,22 @@ class PVDashboard:
             )
             fig.update_layout(**light_layout(
                 height=320,
-                xaxis=dict(gridcolor=_theme()["grid"], title="Time", range=["06:00", "20:00"], tickfont=dict(color=_theme()["font"])),
+                xaxis=dict(
+                    gridcolor=_theme()["grid"], title="Time",
+                    range=["06:00", "20:00"],
+                    tickfont=dict(color=_theme()["font"], size=9),
+                    tickmode="array",
+                    tickvals=[f"{h:02d}:{m:02d}" for h in range(6, 21) for m in (0, 30) if not (h == 20 and m == 30)],
+                    ticktext=[f"{h:02d}:{m:02d}" for h in range(6, 21) for m in (0, 30) if not (h == 20 and m == 30)],
+                    tickangle=-45,
+                ),
                 yaxis=dict(title="SOC (%)", range=[0, 105], gridcolor=_theme()["grid"],
                            title_font=dict(color="#3a7d1e"), tickfont=dict(color="#3a7d1e")),
                 yaxis2=dict(title="Battery Voltage (V)", overlaying="y", side="right",
                             range=[10.5, 16], gridcolor="rgba(0,0,0,0)",
                             title_font=dict(color="#d4a030"), tickfont=dict(color="#d4a030")),
                 legend=dict(orientation="h", y=1.08, x=0, bgcolor="rgba(0,0,0,0)", font=dict(color=_theme()["font"], size=9)),
-                margin=dict(l=12, r=12, t=40, b=40),
+                margin=dict(l=12, r=12, t=40, b=60),
             ))
             st.plotly_chart(fig, use_container_width=True, key="battery_chart")
 
