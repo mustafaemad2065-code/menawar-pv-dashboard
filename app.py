@@ -703,6 +703,120 @@ def simulate_weather_forecast() -> dict:
 
 
 # ─────────────────────────────────────────
+#  WEEK HISTORY FETCH  (module-level for @st.cache_data)
+# ─────────────────────────────────────────
+@st.cache_data(ttl=1800)
+def fetch_week_history(channel_id: str, read_key: str, today: str) -> pd.DataFrame | None:
+    """
+    Fetch the past 7 calendar days from ThingSpeak (one request per day).
+    'today' (YYYY-MM-DD) is part of the cache key so results refresh daily.
+    Returns a combined DataFrame with a 'date' column, or None if no data.
+    """
+    if not channel_id or not read_key:
+        return None
+
+    now_c    = now_cairo()
+    all_rows: list[dict] = []
+
+    for days_back in range(6, -1, -1):
+        target   = now_c - timedelta(days=days_back)
+        date_str = target.strftime("%Y-%m-%d")
+        su       = target.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=3)
+        eu       = su + timedelta(hours=27)
+        url      = (
+            f"https://api.thingspeak.com/channels/{channel_id}/feeds.json"
+            f"?api_key={read_key}"
+            f"&start={su.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+            f"&end={eu.strftime('%Y-%m-%dT%H:%M:%SZ')}&results=8000"
+        )
+        try:
+            r = requests.get(url, timeout=20)
+            r.raise_for_status()
+            for f in r.json().get("feeds", []):
+                ts = pd.to_datetime(f.get("created_at"))
+                if ts.tzinfo is None:
+                    ts = ts.tz_localize("UTC")
+                tc = ts.tz_convert("Africa/Cairo")
+                if tc.strftime("%Y-%m-%d") != date_str:
+                    continue
+                ch  = 6 <= tc.hour < 20
+                soc = voltage_to_soc(float(f.get("field2") or 0), charging=ch)
+                vpv = float(f.get("field1") or 0)
+                a   = float(f.get("field3") or 0)
+                pwr = float(f.get("field4") or 0) or vpv * a
+                all_rows.append({
+                    "time":          tc,
+                    "date":          date_str,
+                    "V_PV":          vpv,
+                    "V_Batt":        float(f.get("field2") or 0),
+                    "Amp":           a,
+                    "Power_W":       pwr,
+                    "Ideal_Power_W": float(f.get("field5") or 20.0),
+                    "UV_Ideal":      float(f.get("field6") or 0),
+                    "UV":            float(f.get("field7") or 0),
+                    "Dust":          float(f.get("field8") or 0),
+                    "SOC":           soc,
+                })
+        except Exception:
+            pass
+
+    if not all_rows:
+        return None
+    return pd.DataFrame(all_rows).sort_values("time").reset_index(drop=True)
+
+
+def extract_fault_events(df: pd.DataFrame) -> list[dict]:
+    """Convert a classified DataFrame into a list of contiguous fault-event dicts."""
+    if df.empty or "Status" not in df.columns:
+        return []
+
+    events: list[dict] = []
+    in_fault   = False
+    fault_start: pd.Timestamp | None = None
+    cur_fault  = ""
+    last_t: pd.Timestamp | None = None
+
+    for _, row in df.iterrows():
+        t        = row["time"]
+        is_fault = not any(k in row["Status"] for k in ("Normal", "Night", "Full"))
+
+        if is_fault and not in_fault:
+            in_fault = True; fault_start = t; cur_fault = row["Status"]
+        elif is_fault and in_fault and row["Status"] != cur_fault:
+            dur = max(1, int((t - fault_start).total_seconds() / 60))
+            events.append({"date": fault_start.strftime("%Y-%m-%d"),
+                           "day":  fault_start.strftime("%A"),
+                           "start": fault_start.strftime("%H:%M"),
+                           "end":   t.strftime("%H:%M"),
+                           "duration_min": dur,
+                           "fault_type":   cur_fault,
+                           "loss_pct":     fault_loss(cur_fault)})
+            fault_start = t; cur_fault = row["Status"]
+        elif not is_fault and in_fault:
+            in_fault = False
+            dur = max(1, int((t - fault_start).total_seconds() / 60))
+            events.append({"date": fault_start.strftime("%Y-%m-%d"),
+                           "day":  fault_start.strftime("%A"),
+                           "start": fault_start.strftime("%H:%M"),
+                           "end":   t.strftime("%H:%M"),
+                           "duration_min": dur,
+                           "fault_type":   cur_fault,
+                           "loss_pct":     fault_loss(cur_fault)})
+        last_t = t
+
+    if in_fault and fault_start is not None and last_t is not None:
+        dur = max(1, int((last_t - fault_start).total_seconds() / 60))
+        events.append({"date": fault_start.strftime("%Y-%m-%d"),
+                       "day":  fault_start.strftime("%A"),
+                       "start": fault_start.strftime("%H:%M"),
+                       "end":   "→ ongoing",
+                       "duration_min": dur,
+                       "fault_type":   cur_fault,
+                       "loss_pct":     fault_loss(cur_fault)})
+    return events
+
+
+# ─────────────────────────────────────────
 #  FIX 4 — SEQUENCE TREND ANALYSIS
 # ─────────────────────────────────────────
 def analyze_sequence_trend(
@@ -1619,6 +1733,373 @@ class PVDashboard:
 </div>""",
                     unsafe_allow_html=True,
                 )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    # ─────────────────────────────────────
+    #  PANEL: WEEK REPORT
+    # ─────────────────────────────────────
+    def panel_week_report(self, week_df: pd.DataFrame | None) -> None:
+        with st.container():
+            st.markdown("<div class='panel-content'>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='mn-section'><span style='font-size:1rem'>📆</span>"
+                "<span class='mn-section-title'>Week Report — 7 Days System History</span></div>",
+                unsafe_allow_html=True,
+            )
+
+            if week_df is None or week_df.empty:
+                st.info("📡 Week report requires Live ThingSpeak mode. Please connect your channel.")
+                st.markdown("</div>", unsafe_allow_html=True)
+                return
+
+            week_df = self.classify(week_df)
+            dates   = sorted(week_df["date"].unique())
+
+            # ── Per-day statistics ──────────────────────
+            daily_stats: list[dict] = []
+            all_events:  list[dict] = []
+
+            for d in dates:
+                ddf     = week_df[week_df["date"] == d]
+                prod_df = ddf[(ddf["time"].dt.hour >= 6) & (ddf["time"].dt.hour < 20)]
+                if prod_df.empty:
+                    continue
+
+                total    = len(prod_df)
+                fault_n  = (~prod_df["Status"].str.contains("Normal|Full", na=False)).sum()
+                avg_pwr  = float(prod_df["Power_W"].mean())
+                ideal_pw = float(prod_df["Ideal_Power_W"].mean())
+                eff      = (avg_pwr / ideal_pw * 100) if ideal_pw > 0 else 0.0
+
+                sc_df             = prod_df.groupby("Status").size().reset_index(name="count")
+                sc_df["loss"]     = sc_df["Status"].apply(fault_loss)
+                sc_df["time_pct"] = sc_df["count"] / sc_df["count"].sum() * 100
+                sc_df["contrib"]  = sc_df["time_pct"] * sc_df["loss"] / 100
+                total_loss        = float(sc_df["contrib"].sum())
+
+                fault_rows = prod_df[~prod_df["Status"].str.contains("Normal|Night|Full", na=False)]
+                main_fault = fault_rows["Status"].mode()[0] if not fault_rows.empty else "None"
+
+                events = extract_fault_events(ddf)
+                all_events.extend(events)
+
+                dt_obj = datetime.strptime(d, "%Y-%m-%d")
+                daily_stats.append({
+                    "date":           d,
+                    "day_name":       dt_obj.strftime("%A"),
+                    "avg_power":      round(avg_pwr, 1),
+                    "efficiency":     round(eff, 1),
+                    "fault_time_pct": round(fault_n / total * 100, 1) if total > 0 else 0.0,
+                    "total_loss":     round(total_loss, 2),
+                    "main_fault":     main_fault,
+                    "n_events":       len(events),
+                })
+
+            if not daily_stats:
+                st.warning("No production data found for the past 7 days.")
+                st.markdown("</div>", unsafe_allow_html=True)
+                return
+
+            # ── Summary Metrics ──────────────────────────
+            n_days           = len(daily_stats)
+            days_with_faults = sum(1 for d in daily_stats if d["n_events"] > 0)
+            avg_eff          = sum(d["efficiency"] for d in daily_stats) / n_days
+            worst            = max(daily_stats, key=lambda x: x["total_loss"])
+            best             = min(daily_stats, key=lambda x: x["total_loss"])
+
+            k1, k2, k3, k4, k5 = st.columns(5)
+            k1.metric("📅 Days Analyzed",  str(n_days))
+            k2.metric("⚠️ Days w/ Faults", str(days_with_faults), f"of {n_days} days")
+            k3.metric("⚡ Avg Efficiency",  f"{avg_eff:.1f}%",     "Actual / Ideal")
+            k4.metric("🔴 Worst Day",       worst["day_name"][:3], f"−{worst['total_loss']:.1f}% loss")
+            k5.metric("✅ Best Day",        best["day_name"][:3],  f"−{best['total_loss']:.1f}% loss")
+
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📊  Weekly Power Timeline",
+                "📋  Daily Summary",
+                "⚡  Power Loss Events",
+                "📉  Weekly Loss Breakdown",
+            ])
+
+            # ─── TAB 1: WEEKLY POWER TIMELINE ───────────
+            with tab1:
+                prod_week = week_df[
+                    (week_df["time"].dt.hour >= 6) & (week_df["time"].dt.hour < 20)
+                ].copy()
+                prod_week["fault"] = ~prod_week["Status"].str.contains("Normal|Night|Full", na=False)
+
+                # Fault shade bands
+                shapes = []
+                in_f = False; fs = None; prev_t = None
+                for _, row in prod_week.iterrows():
+                    rt = row["time"]
+                    if row["fault"] and not in_f:
+                        in_f = True; fs = rt
+                    elif not row["fault"] and in_f:
+                        in_f = False
+                        shapes.append(dict(type="rect", xref="x", yref="paper",
+                                           x0=fs, x1=rt, y0=0, y1=1,
+                                           fillcolor="rgba(220,38,38,0.07)", line_width=0, layer="below"))
+                    prev_t = rt
+                if in_f and fs is not None and prev_t is not None:
+                    shapes.append(dict(type="rect", xref="x", yref="paper",
+                                       x0=fs, x1=prev_t, y0=0, y1=1,
+                                       fillcolor="rgba(220,38,38,0.07)", line_width=0, layer="below"))
+
+                # Day boundary annotations
+                annotations = []
+                for d in dates:
+                    mid_t = pd.Timestamp(f"{d} 13:00", tz="Africa/Cairo")
+                    dt_obj = datetime.strptime(d, "%Y-%m-%d")
+                    is_today = d == now_cairo().strftime("%Y-%m-%d")
+                    annotations.append(dict(
+                        x=mid_t, y=1.07, xref="x", yref="paper",
+                        text=f"<b>{dt_obj.strftime('%a')}</b><br>{dt_obj.strftime('%d/%m')}{'★' if is_today else ''}",
+                        showarrow=False,
+                        font=dict(size=8, color="#3a7d1e" if is_today else _theme()["font"], family="Space Grotesk"),
+                        align="center",
+                    ))
+
+                fig_wk = go.Figure()
+                fig_wk.add_trace(go.Scatter(
+                    x=prod_week["time"], y=prod_week["Ideal_Power_W"],
+                    mode="lines", name="Ideal Power",
+                    line=dict(color="#d4a030", width=1.2, dash="dash"),
+                    hovertemplate="<b>%{x|%a %d/%m %H:%M}</b><br>Ideal: %{y:.1f} W<extra></extra>",
+                ))
+                fig_wk.add_trace(go.Scatter(
+                    x=prod_week["time"], y=prod_week["Power_W"],
+                    mode="lines", name="Output Power",
+                    line=dict(color="#3a7d1e", width=2),
+                    fill="tozeroy", fillcolor="rgba(58,125,30,0.08)",
+                    hovertemplate="<b>%{x|%a %d/%m %H:%M}</b><br>Power: %{y:.1f} W<extra></extra>",
+                ))
+                fig_wk.update_layout(**light_layout(
+                    shapes=shapes, annotations=annotations, height=360,
+                    title=dict(text="📊 7-Day Power Output — Red zones = fault periods",
+                               font=dict(size=11, color=_theme()["font"])),
+                    xaxis=dict(gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"], size=8),
+                               tickformat="%a %H:%M"),
+                    yaxis=dict(title="Power (W)", range=[0, 25], gridcolor=_theme()["grid"],
+                               tickfont=dict(color=_theme()["font"])),
+                    legend=dict(orientation="h", y=1.08, x=0, bgcolor="rgba(0,0,0,0)",
+                                font=dict(size=9, color=_theme()["font"])),
+                    margin=dict(l=12, r=12, t=70, b=20), hovermode="x unified",
+                ))
+                st.plotly_chart(fig_wk, use_container_width=True, key="week_power_chart")
+
+                # Battery SOC across week
+                fig_soc = go.Figure()
+                fig_soc.add_trace(go.Scatter(
+                    x=prod_week["time"], y=prod_week["SOC"],
+                    mode="lines", name="SOC %",
+                    line=dict(color="#c47a1e", width=2),
+                    fill="tozeroy", fillcolor="rgba(196,122,30,0.07)",
+                    hovertemplate="<b>%{x|%a %d/%m %H:%M}</b><br>SOC: %{y:.1f}%<extra></extra>",
+                ))
+                fig_soc.add_hline(y=30, line=dict(color="#dc2626", width=1, dash="dash"))
+                fig_soc.update_layout(**light_layout(
+                    height=170,
+                    xaxis=dict(gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"], size=8),
+                               tickformat="%a %H:%M"),
+                    yaxis=dict(title="SOC (%)", range=[0, 105], gridcolor=_theme()["grid"],
+                               tickfont=dict(color=_theme()["font"])),
+                    legend=dict(orientation="h", y=1.12, x=0, bgcolor="rgba(0,0,0,0)",
+                                font=dict(size=9, color=_theme()["font"])),
+                    margin=dict(l=12, r=12, t=28, b=20), hovermode="x unified",
+                ))
+                st.plotly_chart(fig_soc, use_container_width=True, key="week_soc_chart")
+
+            # ─── TAB 2: DAILY SUMMARY ────────────────────
+            with tab2:
+                st.markdown(
+                    """<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;
+  margin-bottom:6px;border-radius:10px;background:#f8faf6;border:1px solid rgba(58,125,30,.12);'>
+  <div style='min-width:100px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>DATE</div>
+  <div style='min-width:80px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>AVG POWER</div>
+  <div style='min-width:80px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>EFFICIENCY</div>
+  <div style='min-width:85px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>FAULT TIME</div>
+  <div style='flex:1;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>MAIN FAULT</div>
+  <div style='min-width:90px;font-size:.62rem;color:#dc2626;letter-spacing:1px;text-transform:uppercase;font-weight:700;text-align:right;'>POWER LOSS</div>
+  <div style='min-width:60px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;text-align:right;'>EVENTS</div>
+</div>""",
+                    unsafe_allow_html=True,
+                )
+                today_str = now_cairo().strftime("%Y-%m-%d")
+                for ds in daily_stats:
+                    fc     = fault_color(ds["main_fault"]) if ds["main_fault"] != "None" else "#2d8a3e"
+                    loss_c = "#dc2626" if ds["total_loss"] > 15 else "#d4a030" if ds["total_loss"] > 5 else "#2d8a3e"
+                    eff_c  = "#2d8a3e" if ds["efficiency"] > 80 else "#d4a030" if ds["efficiency"] > 55 else "#dc2626"
+                    badge  = (
+                        "<span style='background:rgba(45,138,62,.12);color:#2d8a3e;padding:1px 8px;"
+                        "border-radius:4px;font-size:.62rem;font-weight:700;margin-left:4px;'>TODAY</span>"
+                        if ds["date"] == today_str else ""
+                    )
+                    st.markdown(
+                        f"""<div class='hr-row'>
+  <div style='min-width:100px;'>
+    <div style='font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:.84rem;color:#2d6a2d;'>{ds["day_name"]}{badge}</div>
+    <div style='font-size:.68rem;color:#8aaa7a;'>{ds["date"]}</div>
+  </div>
+  <div style='min-width:80px;font-size:.78rem;color:#3a7d1e;font-weight:600;'>{ds["avg_power"]} W</div>
+  <div style='min-width:80px;font-size:.78rem;color:{eff_c};font-weight:700;'>{ds["efficiency"]:.1f}%</div>
+  <div style='min-width:85px;font-size:.78rem;color:#d4a030;font-weight:600;'>{ds["fault_time_pct"]:.1f}%</div>
+  <div style='flex:1;'>
+    <span style='background:{fc}15;color:{fc};padding:3px 10px;border-radius:6px;font-size:.72rem;font-weight:700;border:1px solid {fc}40;'>{ds["main_fault"]}</span>
+  </div>
+  <div style='min-width:90px;text-align:right;font-family:"Space Grotesk",sans-serif;font-size:.78rem;color:{loss_c};font-weight:700;'>−{ds["total_loss"]:.2f}%</div>
+  <div style='min-width:60px;text-align:right;font-size:.78rem;color:#4a6741;font-weight:600;'>{ds["n_events"]}</div>
+</div>""",
+                        unsafe_allow_html=True,
+                    )
+
+            # ─── TAB 3: POWER LOSS EVENTS ─────────────────
+            with tab3:
+                if not all_events:
+                    st.success("✅ No fault events detected in the past 7 days — clean week!")
+                else:
+                    total_events = len(all_events)
+                    st.markdown(
+                        f"<div style='font-size:.76rem;color:#4a6741;margin-bottom:12px;'>"
+                        f"Found <b style='color:#dc2626;'>{total_events}</b> power-loss event(s) "
+                        f"across {days_with_faults} day(s) — sorted latest first.</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        """<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;
+  margin-bottom:6px;border-radius:10px;background:#f8faf6;border:1px solid rgba(58,125,30,.12);'>
+  <div style='min-width:90px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>DATE</div>
+  <div style='min-width:70px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>START</div>
+  <div style='min-width:70px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>END</div>
+  <div style='min-width:75px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>DURATION</div>
+  <div style='flex:1;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>FAULT TYPE</div>
+  <div style='min-width:80px;font-size:.62rem;color:#dc2626;letter-spacing:1px;text-transform:uppercase;font-weight:700;text-align:right;'>POWER LOSS</div>
+</div>""",
+                        unsafe_allow_html=True,
+                    )
+                    for ev in sorted(all_events, key=lambda x: (x["date"], x["start"]), reverse=True):
+                        fc      = fault_color(ev["fault_type"])
+                        dm      = ev["duration_min"]
+                        dur_str = f"{dm}m" if dm < 60 else f"{dm // 60}h {dm % 60:02d}m"
+                        loss_c  = "#dc2626" if ev["loss_pct"] >= 80 else "#d4a030" if ev["loss_pct"] >= 30 else "#c47a1e"
+                        st.markdown(
+                            f"""<div class='hr-row'>
+  <div style='min-width:90px;'>
+    <div style='font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:.82rem;color:#2d6a2d;'>{ev["day"][:3]}</div>
+    <div style='font-size:.65rem;color:#8aaa7a;'>{ev["date"]}</div>
+  </div>
+  <div style='min-width:70px;font-size:.78rem;color:#1a2e12;font-weight:600;'>{ev["start"]}</div>
+  <div style='min-width:70px;font-size:.78rem;color:#4a6741;'>{ev["end"]}</div>
+  <div style='min-width:75px;font-size:.75rem;color:#3a7d1e;font-weight:600;'>{dur_str}</div>
+  <div style='flex:1;'>
+    <span style='background:{fc}15;color:{fc};padding:3px 10px;border-radius:6px;font-size:.72rem;font-weight:700;border:1px solid {fc}40;'>{ev["fault_type"]}</span>
+  </div>
+  <div style='min-width:80px;text-align:right;font-family:"Space Grotesk",sans-serif;font-size:.75rem;color:{loss_c};font-weight:700;'>−{ev["loss_pct"]}%</div>
+</div>""",
+                            unsafe_allow_html=True,
+                        )
+
+            # ─── TAB 4: WEEKLY LOSS BREAKDOWN ─────────────
+            with tab4:
+                x_labels  = [f"{d['day_name'][:3]} {d['date'][5:]}" for d in daily_stats]
+                day_losses = [d["total_loss"]  for d in daily_stats]
+                day_effs   = [d["efficiency"]  for d in daily_stats]
+                bar_colors = [
+                    "#dc2626" if l > 20 else "#d4a030" if l > 8 else "#2d8a3e"
+                    for l in day_losses
+                ]
+
+                col_bar, col_pie = st.columns(2)
+
+                with col_bar:
+                    fig_bar = go.Figure(go.Bar(
+                        x=x_labels, y=day_losses,
+                        marker_color=bar_colors, opacity=0.85,
+                        text=[f"{v:.1f}%" for v in day_losses],
+                        textposition="outside",
+                        textfont=dict(size=9, color=_theme()["font"]),
+                        hovertemplate="<b>%{x}</b><br>Power Loss: %{y:.2f}%<extra></extra>",
+                    ))
+                    fig_bar.update_layout(**light_layout(
+                        height=280,
+                        title=dict(text="📉 Daily Power Loss (%)", font=dict(size=11, color=_theme()["font"])),
+                        xaxis=dict(gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"], size=9)),
+                        yaxis=dict(title="Loss (%)", gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"])),
+                        margin=dict(l=12, r=12, t=50, b=50), showlegend=False,
+                    ))
+                    st.plotly_chart(fig_bar, use_container_width=True, key="week_bar_loss")
+
+                with col_pie:
+                    if all_events:
+                        fault_mins: dict[str, int] = {}
+                        for ev in all_events:
+                            fault_mins[ev["fault_type"]] = fault_mins.get(ev["fault_type"], 0) + ev["duration_min"]
+                        pie_labels = list(fault_mins.keys())
+                        pie_values = list(fault_mins.values())
+                        fig_pie = go.Figure(go.Pie(
+                            labels=pie_labels, values=pie_values, hole=0.50,
+                            marker=dict(colors=[fault_color(l) for l in pie_labels],
+                                        line=dict(color="rgba(255,255,255,0.2)", width=2)),
+                            textinfo="label+percent",
+                            textfont=dict(size=9, family="Plus Jakarta Sans", color=_theme()["font"]),
+                            hovertemplate="<b>%{label}</b><br>%{value} minutes<extra></extra>",
+                        ))
+                        fig_pie.update_layout(**light_layout(
+                            showlegend=False, height=280,
+                            title=dict(text="⏱ Fault Type Distribution (total minutes)",
+                                       font=dict(size=11, color=_theme()["font"])),
+                            margin=dict(l=10, r=10, t=50, b=10),
+                        ))
+                        st.plotly_chart(fig_pie, use_container_width=True, key="week_pie_faults")
+                    else:
+                        st.success("✅ No faults to display — clean week!")
+
+                # Efficiency trend line
+                eff_colors = [
+                    "#2d8a3e" if e > 80 else "#d4a030" if e > 55 else "#dc2626"
+                    for e in day_effs
+                ]
+                fig_eff = go.Figure(go.Scatter(
+                    x=x_labels, y=day_effs,
+                    mode="lines+markers+text",
+                    marker=dict(color=eff_colors, size=10, line=dict(color="white", width=2)),
+                    line=dict(color="#3a7d1e", width=2),
+                    text=[f"{e:.0f}%" for e in day_effs],
+                    textposition="top center",
+                    textfont=dict(size=9, color=_theme()["font"]),
+                    hovertemplate="<b>%{x}</b><br>Efficiency: %{y:.1f}%<extra></extra>",
+                ))
+                fig_eff.add_hline(y=80, line=dict(color="#2d8a3e", width=1, dash="dot"),
+                                  annotation_text="80% target",
+                                  annotation_font=dict(color="#2d8a3e", size=9))
+                fig_eff.update_layout(**light_layout(
+                    height=200,
+                    title=dict(text="⚡ Daily System Efficiency (%)", font=dict(size=11, color=_theme()["font"])),
+                    xaxis=dict(gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"], size=9)),
+                    yaxis=dict(title="Efficiency (%)", range=[0, 110], gridcolor=_theme()["grid"],
+                               tickfont=dict(color=_theme()["font"])),
+                    margin=dict(l=12, r=12, t=50, b=30), showlegend=False,
+                ))
+                st.plotly_chart(fig_eff, use_container_width=True, key="week_eff_chart")
+
+                # Weekly totals summary box
+                avg_week_loss = sum(day_losses) / max(len(day_losses), 1)
+                total_ev      = len(all_events)
+                st.markdown(
+                    f"""<div style='text-align:right;font-family:"Space Grotesk",sans-serif;font-weight:700;
+  font-size:.95rem;margin-top:14px;padding:14px 18px;background:rgba(220,38,38,.05);
+  border:1px solid rgba(220,38,38,.18);border-radius:12px;color:#1a2e12;'>
+  AVG WEEKLY POWER LOSS — <span style='color:#dc2626;'>{avg_week_loss:.2f}%</span>
+  &nbsp;·&nbsp;
+  FAULT EVENTS — <span style='color:#d4a030;'>{total_ev}</span>
+  &nbsp;·&nbsp;
+  AVG EFFICIENCY — <span style='color:#2d8a3e;'>{avg_eff:.1f}%</span>
+</div>""",
+                    unsafe_allow_html=True,
+                )
+
             st.markdown("</div>", unsafe_allow_html=True)
 
     # ─────────────────────────────────────
@@ -2641,14 +3122,15 @@ class PVDashboard:
         #  TOP NAV BUTTONS
         # ══════════════════════════════════
         nav_items = [
-            ("⚡", "Overview",   "Live metrics & status", "overview"),
-            ("🤖", "AI Diagnosis","Fault detection engine", "diagnosis"),
-            ("📅", "Day Report", "Today's full history",   "day_report"),
-            ("🔋", "Battery",    "SOC & discharge log",    "battery"),
-            ("🔭", "Predictive", "Forecast & risk score",  "prediction"),
-            ("🧹", "Cleaning",   "Panel cleaning control", "cleaning"),
+            ("⚡", "Overview",   "Live metrics & status",   "overview"),
+            ("🤖", "AI Diagnosis","Fault detection engine",  "diagnosis"),
+            ("📅", "Day Report", "Today's full history",    "day_report"),
+            ("📆", "Week Report","7-day system history",    "week_report"),
+            ("🔋", "Battery",    "SOC & discharge log",     "battery"),
+            ("🔭", "Predictive", "Forecast & risk score",   "prediction"),
+            ("🧹", "Cleaning",   "Panel cleaning control",  "cleaning"),
         ]
-        nav_cols = st.columns(6)
+        nav_cols = st.columns(7)
         for col, (icon, title, sub, key) in zip(nav_cols, nav_items):
             active       = st.session_state.active_panel == key
             border_style = "2px solid #3a7d1e" if active else "1.5px solid rgba(58,125,30,.18)"
@@ -2681,11 +3163,20 @@ class PVDashboard:
         panel = st.session_state.active_panel
         _panel_slot = st.empty()
 
-        # Helper: fetch history only when needed
+        # Helper: fetch today's history only when needed
         def _get_hist() -> pd.DataFrame | None:
             if mode == "📡 Live ThingSpeak":
                 with st.spinner("📡 Loading today's data..."):
                     return self.fetch_history()
+            return None
+
+        # Helper: fetch 7-day history only when needed (7 API requests — cached 30 min)
+        def _get_week() -> pd.DataFrame | None:
+            if mode == "📡 Live ThingSpeak":
+                with st.spinner("📡 Loading 7 days of data… this may take a moment"):
+                    return fetch_week_history(
+                        self.channel_id, self.read_api_key, now.strftime("%Y-%m-%d")
+                    )
             return None
 
         with _panel_slot.container():
@@ -2713,6 +3204,9 @@ class PVDashboard:
             elif panel == "day_report":
                 self.panel_day_report(_get_hist())
 
+            elif panel == "week_report":
+                self.panel_week_report(_get_week())
+
             elif panel == "battery":
                 self.panel_battery(soc, v_batt, is_prod_p, is_night, mode, _get_hist())
 
@@ -2736,7 +3230,7 @@ class PVDashboard:
         if (
             mode == "📡 Live ThingSpeak"
             and auto_refresh
-            and panel not in ("about_us", "contact_us", "home")
+            and panel not in ("about_us", "contact_us", "home", "week_report")
         ):
             if "next_refresh_at" not in st.session_state:
                 st.session_state.next_refresh_at = time.time() + _REFRESH_INTERVAL
