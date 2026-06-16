@@ -1880,7 +1880,7 @@ class PVDashboard:
                 sf3.metric("⏰ Peak Hour",        peak_label,          "Most frequent")
                 sf4.metric("⏱ Avg Duration",     f"{avg_dur:.0f} min", "per event")
 
-                if n_readings > 0:
+                if n_readings > 0 and hr_start <= hr_end:
                     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
                     hm_col, ev_col = st.columns([3, 2])
 
@@ -1900,36 +1900,47 @@ class PVDashboard:
                             is_today = d == now_cairo().strftime("%Y-%m-%d")
                             hm_y.append(f"{'★ ' if is_today else ''}{dt_obj.strftime('%a %d/%m')}")
 
-                        hm_x = [f"{h:02d}:00" for h in hours_range]
-                        fig_hm = go.Figure(go.Heatmap(
-                            z=hm_z, x=hm_x, y=hm_y,
-                            colorscale=[
+                        hm_x   = [f"{h:02d}:00" for h in hours_range]
+                        z_flat = [v for row in hm_z for v in row]
+                        z_max  = max(z_flat) if z_flat else 0
+
+                        if z_max == 0:
+                            st.info(f"No readings for '{status_focus}' in the selected time window.")
+                        else:
+                            # Convert hex color to rgba — Plotly doesn't support 8-digit hex
+                            _h = fc_col.lstrip("#")
+                            _r, _g, _b = int(_h[0:2], 16), int(_h[2:4], 16), int(_h[4:6], 16)
+                            _cs = [
                                 [0.0,  "rgba(0,0,0,0)"],
-                                [0.01, f"{fc_col}20"],
-                                [0.5,  f"{fc_col}80"],
-                                [1.0,  fc_col],
-                            ],
-                            showscale=True,
-                            hovertemplate="<b>%{y} — %{x}</b><br>Readings: %{z}<extra></extra>",
-                            colorbar=dict(
-                                thickness=10, len=0.8,
-                                tickfont=dict(color=_theme()["font"], size=8),
-                                title=dict(text="Readings", font=dict(color=_theme()["font"], size=8)),
-                            ),
-                        ))
-                        fig_hm.update_layout(**light_layout(
-                            height=230,
-                            title=dict(
-                                text=f"🗓 {status_focus} — Occurrence Heatmap (Day × Hour)",
-                                font=dict(size=10, color=_theme()["font"]),
-                            ),
-                            xaxis=dict(tickfont=dict(color=_theme()["font"], size=8),
-                                       gridcolor=_theme()["grid"]),
-                            yaxis=dict(tickfont=dict(color=_theme()["font"], size=8),
-                                       autorange="reversed"),
-                            margin=dict(l=10, r=10, t=44, b=10),
-                        ))
-                        st.plotly_chart(fig_hm, use_container_width=True, key="focus_heatmap")
+                                [0.01, f"rgba({_r},{_g},{_b},0.12)"],
+                                [0.5,  f"rgba({_r},{_g},{_b},0.55)"],
+                                [1.0,  f"rgba({_r},{_g},{_b},1.0)"],
+                            ]
+                            fig_hm = go.Figure(go.Heatmap(
+                                z=hm_z, x=hm_x, y=hm_y,
+                                colorscale=_cs,
+                                zmin=0, zmax=z_max,
+                                showscale=True,
+                                hovertemplate="<b>%{y} — %{x}</b><br>Readings: %{z}<extra></extra>",
+                                colorbar=dict(
+                                    thickness=10, len=0.8,
+                                    tickfont=dict(color=_theme()["font"], size=8),
+                                    title=dict(text="Readings", font=dict(color=_theme()["font"], size=8)),
+                                ),
+                            ))
+                            fig_hm.update_layout(**light_layout(
+                                height=230,
+                                title=dict(
+                                    text=f"🗓 {status_focus} — Occurrence Heatmap (Day × Hour)",
+                                    font=dict(size=10, color=_theme()["font"]),
+                                ),
+                                xaxis=dict(tickfont=dict(color=_theme()["font"], size=8),
+                                           gridcolor=_theme()["grid"]),
+                                yaxis=dict(tickfont=dict(color=_theme()["font"], size=8),
+                                           autorange="reversed"),
+                                margin=dict(l=10, r=10, t=44, b=10),
+                            ))
+                            st.plotly_chart(fig_hm, use_container_width=True, key="focus_heatmap")
 
                     # ── Hour distribution bar ────────────────────
                     with ev_col:
