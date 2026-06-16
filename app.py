@@ -1755,29 +1755,64 @@ class PVDashboard:
             week_df = self.classify(week_df)
             dates   = sorted(week_df["date"].unique())
 
-            # ── Per-day statistics ──────────────────────
+            # ════════════════════════════════════════
+            #  FILTER BAR
+            # ════════════════════════════════════════
+            st.markdown(
+                "<div style='background:#f8faf6;border:1.5px solid rgba(58,125,30,.18);"
+                "border-radius:14px;padding:14px 20px;margin-bottom:18px;'>"
+                "<div style='font-size:.62rem;color:#3a7d1e;letter-spacing:2px;"
+                "text-transform:uppercase;font-weight:700;margin-bottom:10px;'>"
+                "🎛 FILTERS — apply to all tabs &amp; charts</div>",
+                unsafe_allow_html=True,
+            )
+            f_col1, f_col2 = st.columns([3, 2])
+            with f_col1:
+                hr_start, hr_end = st.slider(
+                    "⏰ Hour window",
+                    min_value=0, max_value=23,
+                    value=(6, 20),
+                    format="%d:00",
+                    help="Restrict analysis to readings within this time window",
+                    key="wr_hr_range",
+                )
+            with f_col2:
+                all_statuses = sorted(week_df["Status"].unique().tolist())
+                status_focus = st.selectbox(
+                    "🔍 Status focus",
+                    ["— All Statuses —"] + all_statuses,
+                    key="wr_status_focus",
+                    help="Focus on a specific status — see when & how often it appeared",
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            # Apply time filter
+            working_df = week_df[
+                (week_df["time"].dt.hour >= hr_start) &
+                (week_df["time"].dt.hour <= hr_end)
+            ].copy()
+
+            # ── Per-day statistics from working_df ──────────────────
             daily_stats: list[dict] = []
             all_events:  list[dict] = []
 
             for d in dates:
-                ddf     = week_df[week_df["date"] == d]
-                prod_df = ddf[(ddf["time"].dt.hour >= 6) & (ddf["time"].dt.hour < 20)]
-                if prod_df.empty:
+                ddf = working_df[working_df["date"] == d]
+                if ddf.empty:
                     continue
-
-                total    = len(prod_df)
-                fault_n  = (~prod_df["Status"].str.contains("Normal|Full", na=False)).sum()
-                avg_pwr  = float(prod_df["Power_W"].mean())
-                ideal_pw = float(prod_df["Ideal_Power_W"].mean())
+                total    = len(ddf)
+                fault_n  = (~ddf["Status"].str.contains("Normal|Full", na=False)).sum()
+                avg_pwr  = float(ddf["Power_W"].mean())
+                ideal_pw = float(ddf["Ideal_Power_W"].mean())
                 eff      = (avg_pwr / ideal_pw * 100) if ideal_pw > 0 else 0.0
 
-                sc_df             = prod_df.groupby("Status").size().reset_index(name="count")
+                sc_df             = ddf.groupby("Status").size().reset_index(name="count")
                 sc_df["loss"]     = sc_df["Status"].apply(fault_loss)
                 sc_df["time_pct"] = sc_df["count"] / sc_df["count"].sum() * 100
                 sc_df["contrib"]  = sc_df["time_pct"] * sc_df["loss"] / 100
                 total_loss        = float(sc_df["contrib"].sum())
 
-                fault_rows = prod_df[~prod_df["Status"].str.contains("Normal|Night|Full", na=False)]
+                fault_rows = ddf[~ddf["Status"].str.contains("Normal|Night|Full", na=False)]
                 main_fault = fault_rows["Status"].mode()[0] if not fault_rows.empty else "None"
 
                 events = extract_fault_events(ddf)
@@ -1796,24 +1831,175 @@ class PVDashboard:
                 })
 
             if not daily_stats:
-                st.warning("No production data found for the past 7 days.")
+                st.warning("No data found for the selected time window.")
                 st.markdown("</div>", unsafe_allow_html=True)
                 return
 
-            # ── Summary Metrics ──────────────────────────
             n_days           = len(daily_stats)
             days_with_faults = sum(1 for d in daily_stats if d["n_events"] > 0)
             avg_eff          = sum(d["efficiency"] for d in daily_stats) / n_days
             worst            = max(daily_stats, key=lambda x: x["total_loss"])
             best             = min(daily_stats, key=lambda x: x["total_loss"])
 
+            # ════════════════════════════════════════
+            #  STATUS FOCUS SECTION
+            #  (shown only when a specific status is selected)
+            # ════════════════════════════════════════
+            if status_focus != "— All Statuses —":
+                focused_df    = working_df[working_df["Status"] == status_focus]
+                focus_events  = [e for e in all_events if e["fault_type"] == status_focus]
+                fc_col        = fault_color(status_focus)
+                n_readings    = len(focused_df)
+                n_ev          = len(focus_events)
+                days_seen     = sorted(focused_df["date"].unique().tolist())
+                n_days_seen   = len(days_seen)
+                avg_dur       = (
+                    sum(e["duration_min"] for e in focus_events) / n_ev
+                    if n_ev > 0 else 0
+                )
+
+                # Peak hour of this status
+                if n_readings > 0:
+                    peak_hour = int(focused_df["time"].dt.hour.value_counts().idxmax())
+                    peak_label = f"{peak_hour:02d}:00"
+                else:
+                    peak_label = "—"
+
+                st.markdown(
+                    f"""<div style='border:2px solid {fc_col}40;border-radius:16px;
+  padding:20px 24px;margin-bottom:20px;position:relative;overflow:hidden;
+  background:{fc_col}06;'>
+  <div style='position:absolute;top:0;left:0;right:0;height:3px;background:{fc_col};border-radius:16px 16px 0 0;'></div>
+  <div style='font-size:.62rem;color:{fc_col};letter-spacing:2px;text-transform:uppercase;
+      font-weight:700;margin-bottom:12px;'>🔍 STATUS FOCUS — {status_focus}</div>""",
+                    unsafe_allow_html=True,
+                )
+                sf1, sf2, sf3, sf4 = st.columns(4)
+                sf1.metric("🔁 Total Events",    str(n_ev),           f"in {n_days} days")
+                sf2.metric("📅 Days Affected",   str(n_days_seen),    f"of {n_days} days")
+                sf3.metric("⏰ Peak Hour",        peak_label,          "Most frequent")
+                sf4.metric("⏱ Avg Duration",     f"{avg_dur:.0f} min", "per event")
+
+                if n_readings > 0:
+                    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+                    hm_col, ev_col = st.columns([3, 2])
+
+                    # ── Heatmap: Day × Hour ──────────────────────
+                    with hm_col:
+                        hours_range = list(range(hr_start, hr_end + 1))
+                        hm_z   = []
+                        hm_y   = []
+                        for d in dates:
+                            day_focused = focused_df[focused_df["date"] == d]
+                            row_vals = [
+                                int((day_focused["time"].dt.hour == h).sum())
+                                for h in hours_range
+                            ]
+                            hm_z.append(row_vals)
+                            dt_obj = datetime.strptime(d, "%Y-%m-%d")
+                            is_today = d == now_cairo().strftime("%Y-%m-%d")
+                            hm_y.append(f"{'★ ' if is_today else ''}{dt_obj.strftime('%a %d/%m')}")
+
+                        hm_x = [f"{h:02d}:00" for h in hours_range]
+                        fig_hm = go.Figure(go.Heatmap(
+                            z=hm_z, x=hm_x, y=hm_y,
+                            colorscale=[
+                                [0.0,  "rgba(0,0,0,0)"],
+                                [0.01, f"{fc_col}20"],
+                                [0.5,  f"{fc_col}80"],
+                                [1.0,  fc_col],
+                            ],
+                            showscale=True,
+                            hovertemplate="<b>%{y} — %{x}</b><br>Readings: %{z}<extra></extra>",
+                            colorbar=dict(
+                                thickness=10, len=0.8,
+                                tickfont=dict(color=_theme()["font"], size=8),
+                                title=dict(text="Readings", font=dict(color=_theme()["font"], size=8)),
+                            ),
+                        ))
+                        fig_hm.update_layout(**light_layout(
+                            height=230,
+                            title=dict(
+                                text=f"🗓 {status_focus} — Occurrence Heatmap (Day × Hour)",
+                                font=dict(size=10, color=_theme()["font"]),
+                            ),
+                            xaxis=dict(tickfont=dict(color=_theme()["font"], size=8),
+                                       gridcolor=_theme()["grid"]),
+                            yaxis=dict(tickfont=dict(color=_theme()["font"], size=8),
+                                       autorange="reversed"),
+                            margin=dict(l=10, r=10, t=44, b=10),
+                        ))
+                        st.plotly_chart(fig_hm, use_container_width=True, key="focus_heatmap")
+
+                    # ── Hour distribution bar ────────────────────
+                    with ev_col:
+                        hour_counts = (
+                            focused_df["time"].dt.hour.value_counts()
+                            .reindex(hours_range, fill_value=0)
+                        )
+                        fig_hb = go.Figure(go.Bar(
+                            x=[f"{h:02d}:00" for h in hour_counts.index],
+                            y=hour_counts.values,
+                            marker_color=fc_col, opacity=0.82,
+                            hovertemplate="<b>%{x}</b><br>Readings: %{y}<extra></extra>",
+                        ))
+                        fig_hb.update_layout(**light_layout(
+                            height=230,
+                            title=dict(
+                                text="📊 Readings per Hour",
+                                font=dict(size=10, color=_theme()["font"]),
+                            ),
+                            xaxis=dict(tickfont=dict(color=_theme()["font"], size=8),
+                                       tickangle=-45, gridcolor=_theme()["grid"]),
+                            yaxis=dict(tickfont=dict(color=_theme()["font"], size=8),
+                                       gridcolor=_theme()["grid"], title="Count"),
+                            margin=dict(l=10, r=10, t=44, b=50), showlegend=False,
+                        ))
+                        st.plotly_chart(fig_hb, use_container_width=True, key="focus_hour_bar")
+
+                # ── Events list for this status ──────────────────
+                if focus_events:
+                    st.markdown(
+                        f"<div style='font-size:.65rem;color:#4a6741;letter-spacing:1.5px;"
+                        f"text-transform:uppercase;margin:12px 0 8px 0;font-weight:700;'>"
+                        f"📋 {status_focus} — All {n_ev} Event(s)</div>",
+                        unsafe_allow_html=True,
+                    )
+                    for ev in sorted(focus_events, key=lambda x: (x["date"], x["start"]), reverse=True):
+                        dm      = ev["duration_min"]
+                        dur_str = f"{dm}m" if dm < 60 else f"{dm // 60}h {dm % 60:02d}m"
+                        st.markdown(
+                            f"""<div class='hr-row'>
+  <div style='min-width:90px;'>
+    <div style='font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:.82rem;color:#2d6a2d;'>{ev["day"][:3]}</div>
+    <div style='font-size:.65rem;color:#8aaa7a;'>{ev["date"]}</div>
+  </div>
+  <div style='min-width:70px;font-size:.78rem;color:#1a2e12;font-weight:600;'>{ev["start"]}</div>
+  <div style='min-width:10px;font-size:.72rem;color:#8aaa7a;'>→</div>
+  <div style='min-width:70px;font-size:.78rem;color:#4a6741;'>{ev["end"]}</div>
+  <div style='min-width:70px;font-size:.75rem;color:#3a7d1e;font-weight:600;'>{dur_str}</div>
+  <div style='flex:1;'>
+    <span style='background:{fc_col}15;color:{fc_col};padding:3px 10px;border-radius:6px;
+        font-size:.72rem;font-weight:700;border:1px solid {fc_col}40;'>−{ev["loss_pct"]}% power</span>
+  </div>
+</div>""",
+                            unsafe_allow_html=True,
+                        )
+                elif n_readings == 0:
+                    st.info(f"No readings for '{status_focus}' in the selected time window.")
+
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+            # ════════════════════════════════════════
+            #  SUMMARY METRICS
+            # ════════════════════════════════════════
             k1, k2, k3, k4, k5 = st.columns(5)
             k1.metric("📅 Days Analyzed",  str(n_days))
             k2.metric("⚠️ Days w/ Faults", str(days_with_faults), f"of {n_days} days")
             k3.metric("⚡ Avg Efficiency",  f"{avg_eff:.1f}%",     "Actual / Ideal")
             k4.metric("🔴 Worst Day",       worst["day_name"][:3], f"−{worst['total_loss']:.1f}% loss")
             k5.metric("✅ Best Day",        best["day_name"][:3],  f"−{best['total_loss']:.1f}% loss")
-
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
             tab1, tab2, tab3, tab4 = st.tabs([
@@ -1825,9 +2011,7 @@ class PVDashboard:
 
             # ─── TAB 1: WEEKLY POWER TIMELINE ───────────
             with tab1:
-                prod_week = week_df[
-                    (week_df["time"].dt.hour >= 6) & (week_df["time"].dt.hour < 20)
-                ].copy()
+                prod_week = working_df.copy()
                 prod_week["fault"] = ~prod_week["Status"].str.contains("Normal|Night|Full", na=False)
 
                 # Fault shade bands
@@ -1848,10 +2032,42 @@ class PVDashboard:
                                        x0=fs, x1=prev_t, y0=0, y1=1,
                                        fillcolor="rgba(220,38,38,0.07)", line_width=0, layer="below"))
 
+                # Highlight focused status readings
+                focus_shapes = []
+                if status_focus != "— All Statuses —":
+                    focus_sub = prod_week[prod_week["Status"] == status_focus]
+                    if not focus_sub.empty:
+                        fc_col_t = fault_color(status_focus)
+                        in_f2 = False; fs2 = None; prev_t2 = None
+                        for _, row in focus_sub.sort_values("time").iterrows():
+                            rt = row["time"]
+                            if not in_f2:
+                                in_f2 = True; fs2 = rt
+                            prev_t2 = rt
+                        if in_f2 and fs2 is not None and prev_t2 is not None:
+                            # Mark focused status with a distinct colored band
+                            for ev in [e for e in all_events if e["fault_type"] == status_focus]:
+                                try:
+                                    ts0 = pd.Timestamp(f"{ev['date']} {ev['start']}", tz="Africa/Cairo")
+                                    if "→" not in ev["end"]:
+                                        ts1 = pd.Timestamp(f"{ev['date']} {ev['end']}", tz="Africa/Cairo")
+                                    else:
+                                        ts1 = prod_week["time"].max()
+                                    focus_shapes.append(dict(
+                                        type="rect", xref="x", yref="paper",
+                                        x0=ts0, x1=ts1, y0=0, y1=1,
+                                        fillcolor=f"{fc_col_t}22",
+                                        line=dict(color=fc_col_t, width=1.5, dash="dot"),
+                                        layer="above",
+                                    ))
+                                except Exception:
+                                    pass
+
                 # Day boundary annotations
                 annotations = []
                 for d in dates:
-                    mid_t = pd.Timestamp(f"{d} 13:00", tz="Africa/Cairo")
+                    mid_hour = (hr_start + hr_end) // 2
+                    mid_t  = pd.Timestamp(f"{d} {mid_hour:02d}:00", tz="Africa/Cairo")
                     dt_obj = datetime.strptime(d, "%Y-%m-%d")
                     is_today = d == now_cairo().strftime("%Y-%m-%d")
                     annotations.append(dict(
@@ -1876,9 +2092,11 @@ class PVDashboard:
                     fill="tozeroy", fillcolor="rgba(58,125,30,0.08)",
                     hovertemplate="<b>%{x|%a %d/%m %H:%M}</b><br>Power: %{y:.1f} W<extra></extra>",
                 ))
+                all_shapes = shapes + focus_shapes
+                suffix = f" · Focus: {status_focus}" if status_focus != "— All Statuses —" else ""
                 fig_wk.update_layout(**light_layout(
-                    shapes=shapes, annotations=annotations, height=360,
-                    title=dict(text="📊 7-Day Power Output — Red zones = fault periods",
+                    shapes=all_shapes, annotations=annotations, height=360,
+                    title=dict(text=f"📊 Power Output {hr_start:02d}:00–{hr_end:02d}:00{suffix}",
                                font=dict(size=11, color=_theme()["font"])),
                     xaxis=dict(gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"], size=8),
                                tickformat="%a %H:%M"),
@@ -1890,7 +2108,6 @@ class PVDashboard:
                 ))
                 st.plotly_chart(fig_wk, use_container_width=True, key="week_power_chart")
 
-                # Battery SOC across week
                 fig_soc = go.Figure()
                 fig_soc.add_trace(go.Scatter(
                     x=prod_week["time"], y=prod_week["SOC"],
@@ -1901,7 +2118,7 @@ class PVDashboard:
                 ))
                 fig_soc.add_hline(y=30, line=dict(color="#dc2626", width=1, dash="dash"))
                 fig_soc.update_layout(**light_layout(
-                    height=170,
+                    height=160,
                     xaxis=dict(gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"], size=8),
                                tickformat="%a %H:%M"),
                     yaxis=dict(title="SOC (%)", range=[0, 105], gridcolor=_theme()["grid"],
@@ -1914,10 +2131,18 @@ class PVDashboard:
 
             # ─── TAB 2: DAILY SUMMARY ────────────────────
             with tab2:
+                window_note = f"{hr_start:02d}:00 – {hr_end:02d}:00"
+                st.markdown(
+                    f"<div style='font-size:.7rem;color:#8aaa7a;margin-bottom:10px;'>"
+                    f"Showing data for time window <b style='color:#3a7d1e;'>{window_note}</b>"
+                    + (f" · status filter: <b style='color:{fault_color(status_focus)};'>{status_focus}</b>" if status_focus != "— All Statuses —" else "")
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
                 st.markdown(
                     """<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;
   margin-bottom:6px;border-radius:10px;background:#f8faf6;border:1px solid rgba(58,125,30,.12);'>
-  <div style='min-width:100px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>DATE</div>
+  <div style='min-width:110px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>DATE</div>
   <div style='min-width:80px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>AVG POWER</div>
   <div style='min-width:80px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>EFFICIENCY</div>
   <div style='min-width:85px;font-size:.62rem;color:#3a7d1e;letter-spacing:1px;text-transform:uppercase;font-weight:700;'>FAULT TIME</div>
@@ -1937,9 +2162,19 @@ class PVDashboard:
                         "border-radius:4px;font-size:.62rem;font-weight:700;margin-left:4px;'>TODAY</span>"
                         if ds["date"] == today_str else ""
                     )
+                    # Status focus highlight border
+                    highlight = ""
+                    if status_focus != "— All Statuses —":
+                        day_focused_n = len(working_df[
+                            (working_df["date"] == ds["date"]) &
+                            (working_df["Status"] == status_focus)
+                        ])
+                        if day_focused_n > 0:
+                            fc2 = fault_color(status_focus)
+                            highlight = f"border-left:4px solid {fc2};"
                     st.markdown(
-                        f"""<div class='hr-row'>
-  <div style='min-width:100px;'>
+                        f"""<div class='hr-row' style='{highlight}'>
+  <div style='min-width:110px;'>
     <div style='font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:.84rem;color:#2d6a2d;'>{ds["day_name"]}{badge}</div>
     <div style='font-size:.68rem;color:#8aaa7a;'>{ds["date"]}</div>
   </div>
@@ -1957,16 +2192,33 @@ class PVDashboard:
 
             # ─── TAB 3: POWER LOSS EVENTS ─────────────────
             with tab3:
-                if not all_events:
-                    st.success("✅ No fault events detected in the past 7 days — clean week!")
+                # Apply status filter here
+                if status_focus != "— All Statuses —":
+                    display_events = [e for e in all_events if e["fault_type"] == status_focus]
+                    if not display_events:
+                        st.info(f"No events for '{status_focus}' in the selected time window.")
+                    else:
+                        st.markdown(
+                            f"<div style='font-size:.76rem;color:#4a6741;margin-bottom:12px;'>"
+                            f"Showing <b style='color:{fault_color(status_focus)};'>{len(display_events)}</b> "
+                            f"event(s) for <b>{status_focus}</b> · "
+                            f"time window <b style='color:#3a7d1e;'>{hr_start:02d}:00–{hr_end:02d}:00</b></div>",
+                            unsafe_allow_html=True,
+                        )
                 else:
-                    total_events = len(all_events)
-                    st.markdown(
-                        f"<div style='font-size:.76rem;color:#4a6741;margin-bottom:12px;'>"
-                        f"Found <b style='color:#dc2626;'>{total_events}</b> power-loss event(s) "
-                        f"across {days_with_faults} day(s) — sorted latest first.</div>",
-                        unsafe_allow_html=True,
-                    )
+                    display_events = all_events
+                    if not display_events:
+                        st.success("✅ No fault events in the selected window — clean week!")
+                    else:
+                        st.markdown(
+                            f"<div style='font-size:.76rem;color:#4a6741;margin-bottom:12px;'>"
+                            f"<b style='color:#dc2626;'>{len(display_events)}</b> event(s) · "
+                            f"window <b style='color:#3a7d1e;'>{hr_start:02d}:00–{hr_end:02d}:00</b> · "
+                            f"sorted latest first</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                if display_events:
                     st.markdown(
                         """<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;
   margin-bottom:6px;border-radius:10px;background:#f8faf6;border:1px solid rgba(58,125,30,.12);'>
@@ -1979,7 +2231,7 @@ class PVDashboard:
 </div>""",
                         unsafe_allow_html=True,
                     )
-                    for ev in sorted(all_events, key=lambda x: (x["date"], x["start"]), reverse=True):
+                    for ev in sorted(display_events, key=lambda x: (x["date"], x["start"]), reverse=True):
                         fc      = fault_color(ev["fault_type"])
                         dm      = ev["duration_min"]
                         dur_str = f"{dm}m" if dm < 60 else f"{dm // 60}h {dm % 60:02d}m"
@@ -2003,16 +2255,15 @@ class PVDashboard:
 
             # ─── TAB 4: WEEKLY LOSS BREAKDOWN ─────────────
             with tab4:
-                x_labels  = [f"{d['day_name'][:3]} {d['date'][5:]}" for d in daily_stats]
-                day_losses = [d["total_loss"]  for d in daily_stats]
-                day_effs   = [d["efficiency"]  for d in daily_stats]
-                bar_colors = [
+                x_labels   = [f"{d['day_name'][:3]} {d['date'][5:]}" for d in daily_stats]
+                day_losses  = [d["total_loss"] for d in daily_stats]
+                day_effs    = [d["efficiency"] for d in daily_stats]
+                bar_colors  = [
                     "#dc2626" if l > 20 else "#d4a030" if l > 8 else "#2d8a3e"
                     for l in day_losses
                 ]
 
                 col_bar, col_pie = st.columns(2)
-
                 with col_bar:
                     fig_bar = go.Figure(go.Bar(
                         x=x_labels, y=day_losses,
@@ -2032,9 +2283,13 @@ class PVDashboard:
                     st.plotly_chart(fig_bar, use_container_width=True, key="week_bar_loss")
 
                 with col_pie:
-                    if all_events:
+                    pie_events = (
+                        [e for e in all_events if e["fault_type"] == status_focus]
+                        if status_focus != "— All Statuses —" else all_events
+                    )
+                    if pie_events:
                         fault_mins: dict[str, int] = {}
-                        for ev in all_events:
+                        for ev in pie_events:
                             fault_mins[ev["fault_type"]] = fault_mins.get(ev["fault_type"], 0) + ev["duration_min"]
                         pie_labels = list(fault_mins.keys())
                         pie_values = list(fault_mins.values())
@@ -2048,15 +2303,14 @@ class PVDashboard:
                         ))
                         fig_pie.update_layout(**light_layout(
                             showlegend=False, height=280,
-                            title=dict(text="⏱ Fault Type Distribution (total minutes)",
-                                       font=dict(size=11, color=_theme()["font"])),
+                            title=dict(text="⏱ Fault Distribution (minutes)", font=dict(size=11, color=_theme()["font"])),
                             margin=dict(l=10, r=10, t=50, b=10),
                         ))
                         st.plotly_chart(fig_pie, use_container_width=True, key="week_pie_faults")
                     else:
-                        st.success("✅ No faults to display — clean week!")
+                        st.success("✅ No faults to display for this filter.")
 
-                # Efficiency trend line
+                # Efficiency trend
                 eff_colors = [
                     "#2d8a3e" if e > 80 else "#d4a030" if e > 55 else "#dc2626"
                     for e in day_effs
@@ -2084,7 +2338,6 @@ class PVDashboard:
                 ))
                 st.plotly_chart(fig_eff, use_container_width=True, key="week_eff_chart")
 
-                # Weekly totals summary box
                 avg_week_loss = sum(day_losses) / max(len(day_losses), 1)
                 total_ev      = len(all_events)
                 st.markdown(
@@ -2096,6 +2349,8 @@ class PVDashboard:
   FAULT EVENTS — <span style='color:#d4a030;'>{total_ev}</span>
   &nbsp;·&nbsp;
   AVG EFFICIENCY — <span style='color:#2d8a3e;'>{avg_eff:.1f}%</span>
+  &nbsp;·&nbsp;
+  WINDOW — <span style='color:#3a7d1e;'>{hr_start:02d}:00–{hr_end:02d}:00</span>
 </div>""",
                     unsafe_allow_html=True,
                 )
