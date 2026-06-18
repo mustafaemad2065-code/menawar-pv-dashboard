@@ -361,10 +361,7 @@ PLOT_BG     = "rgba(0,0,0,0)"
 PAPER_BG    = "rgba(0,0,0,0)"
 
 def _is_night_mode() -> bool:
-    override = st.session_state.get("night_mode_override", "Auto")
-    if override == "Always Night 🌙": return True
-    if override == "Always Day ☀️":  return False
-    return is_night_time(now_cairo().time())
+    return False
 
 def _theme():
     if _is_night_mode():
@@ -1299,8 +1296,8 @@ class PVDashboard:
                 gridcolor=_theme()["grid"],
                 tickfont=dict(color=_theme()["font"], size=8),
                 tickmode="array",
-                tickvals=[f"{h:02d}:{m:02d}" for h in range(6, 21) for m in (0, 30) if not (h == 20 and m == 30)],
-                ticktext=[f"{h:02d}:{m:02d}" for h in range(6, 21) for m in (0, 30) if not (h == 20 and m == 30)],
+                tickvals=[f"{h:02d}:{m:02d}" for h in range(0, 24) for m in (0, 30)],
+                ticktext=[f"{h:02d}:{m:02d}" for h in range(0, 24) for m in (0, 30)],
                 tickangle=-45,
             ),
             yaxis=dict(title="SOC (%)", range=[0, 105], gridcolor=_theme()["grid"], tickfont=dict(color=_theme()["font"])),
@@ -1526,7 +1523,7 @@ class PVDashboard:
                 "🕐  Hourly Status Summary",
                 "📉  Loss Breakdown",
             ])
-            x_range = ["06:00", "20:00"]
+            x_range = ["00:00", "23:30"]
 
             with tab1:
                 times = hist_df["time"].dt.strftime("%H:%M").tolist()
@@ -2425,7 +2422,7 @@ class PVDashboard:
                 height=320,
                 xaxis=dict(
                     gridcolor=_theme()["grid"], title="Time",
-                    range=["06:00", "20:00"],
+                    range=["00:00", "23:30"],
                     tickfont=dict(color=_theme()["font"], size=9),
                     tickmode="array",
                     tickvals=[f"{h:02d}:{m:02d}" for h in range(6, 21) for m in (0, 30) if not (h == 20 and m == 30)],
@@ -3136,16 +3133,8 @@ class PVDashboard:
         now      = now_cairo()
         prod_now = is_production_period(now.time())
 
-        # ── Determine night mode: auto (time-based) OR manual override ──
-        auto_night = is_night_time(now.time())
-        # Read manual override from session state (set below in sidebar)
-        night_mode_override = st.session_state.get("night_mode_override", "Auto")
-        if night_mode_override == "Always Night 🌙":
-            night_mode = True
-        elif night_mode_override == "Always Day ☀️":
-            night_mode = False
-        else:
-            night_mode = auto_night
+        # Night mode disabled — always use day/production palette
+        night_mode = False
 
         # FIX 3: inject CSS as very first Streamlit call
         inject_css(night_mode=night_mode)
